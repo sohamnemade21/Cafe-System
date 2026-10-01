@@ -299,9 +299,9 @@ export const CustomerMenu: React.FC<CustomerMenuProps> = ({
 
       const res = await api.createOrder(orderPayload);
       setCurrentOrder(res.order);
-
+      setCartItems([]);
       setIsCartOpen(false);
-      setIsRazorpayOpen(true);
+      // Food order placed successfully and sent to Kitchen KDS. Payment happens when customer completes meal.
     } catch (err: any) {
       console.error('Checkout error:', err);
       setCheckoutError(err.message || 'Failed to place order. Please try again.');
@@ -592,7 +592,7 @@ export const CustomerMenu: React.FC<CustomerMenuProps> = ({
       </div>
 
       {/* Main Container */}
-      {currentOrder && currentOrder.payment_status === 'PAID' ? (
+      {currentOrder ? (
         /* Live Order Tracking Page */
         <OrderTracker
           order={currentOrder}
@@ -601,6 +601,7 @@ export const CustomerMenu: React.FC<CustomerMenuProps> = ({
           onBackToMenu={() => setCurrentOrder(null)}
           onCallWaiter={() => setIsCallWaiterOpen(true)}
           onRequestBill={handleRequestBill}
+          onPayOnline={() => setIsRazorpayOpen(true)}
           onReorder={() => setCurrentOrder(null)}
         />
       ) : (

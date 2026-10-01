@@ -5,17 +5,17 @@ import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const supabaseUrl = (env.VITE_SUPABASE_URL || env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
-  const supabaseAnonKey = (env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+  const supabaseUrl = (env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const supabaseAnonKey = (env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim();
+  const apiUrl = (env.VITE_API_URL || process.env.VITE_API_URL || '').trim();
 
   return {
     plugins: [react(), tailwindcss()],
-    envPrefix: ['VITE_', 'SUPABASE_'],
+    envPrefix: ['VITE_'],
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
-      'import.meta.env.SUPABASE_URL': JSON.stringify(supabaseUrl),
-      'import.meta.env.SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
+      'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl),
     },
     resolve: {
       alias: {
@@ -23,6 +23,13 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      port: 5173,
+      proxy: {
+        '/api': {
+          target: process.env.VITE_API_URL || 'http://localhost:3000',
+          changeOrigin: true,
+        },
+      },
       hmr: process.env.DISABLE_HMR === 'true' ? false : (process.env.HMR_CLIENT_PORT ? { clientPort: Number(process.env.HMR_CLIENT_PORT) } : true),
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },

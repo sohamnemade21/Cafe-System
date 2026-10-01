@@ -39,7 +39,7 @@ function getAppRedirectUrl(): string {
   if (typeof window !== 'undefined') {
     return window.location.origin + window.location.pathname;
   }
-  return 'https://ais-dev-ig5ndkxaudp5ozbhq5lcf7-729948221423.asia-east1.run.app';
+  return '';
 }
 
 export const CustomerAuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {

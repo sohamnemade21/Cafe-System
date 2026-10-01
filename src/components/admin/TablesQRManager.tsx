@@ -3,7 +3,7 @@ import { Cafe, CafeTable } from '../../types';
 import { api } from '../../services/api';
 import { PrintQRModal } from './PrintQRModal';
 import { Modal } from '../common/Modal';
-import { Plus, QrCode, Printer, RefreshCw, CheckCircle, ExternalLink, Users } from 'lucide-react';
+import { Plus, QrCode, Printer, RefreshCw, CheckCircle, ExternalLink, Users, Download } from 'lucide-react';
 
 interface TablesQRManagerProps {
   cafe: Cafe;
@@ -59,26 +59,43 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
     onRefresh();
   };
 
+  const [isBatchPrintOpen, setIsBatchPrintOpen] = useState(false);
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold text-stone-900 tracking-tight">
-            Table & QR Code Management
+          <h2 className="text-lg font-bold text-stone-900 tracking-tight flex items-center gap-2">
+            <span>Table & QR Code Management</span>
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+              {tables.length} Tables Active
+            </span>
           </h2>
           <p className="text-xs text-stone-500">
-            Generate printable high-resolution QR standees for every table in {cafe.name}.
+            Generate printable high-resolution QR standees & stickers to place on physical dining tables in {cafe.name}.
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAddTableOpen(true)}
-          className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add New Table</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsBatchPrintOpen(true)}
+            className="px-3.5 py-2 bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            title="Print ready-to-cut standees for all tables at once"
+          >
+            <Printer className="w-4 h-4 text-stone-600" />
+            <span>Batch Print All Standees</span>
+          </button>
+
+          <button
+            onClick={() => setIsAddTableOpen(true)}
+            className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add New Table</span>
+          </button>
+        </div>
       </div>
 
       {/* Tables Grid */}
@@ -87,10 +104,19 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
           const isOccupied = table.status === 'OCCUPIED';
           const isBillRequested = table.status === 'BILL_REQUESTED';
 
+          const handleDownloadPNG = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            if (!table.qr_code_url) return;
+            const link = document.createElement('a');
+            link.download = `${cafe.slug}-Table-${table.table_number}-QR.png`;
+            link.href = table.qr_code_url;
+            link.click();
+          };
+
           return (
             <div
               key={table.id}
-              className={`bg-white rounded-2xl border p-5 transition-all flex flex-col justify-between shadow-xs ${
+              className={`bg-white rounded-2xl border p-5 transition-all flex flex-col justify-between shadow-xs hover:shadow-md ${
                 isBillRequested
                   ? 'border-amber-400 ring-2 ring-amber-400/20'
                   : isOccupied
@@ -127,33 +153,54 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
                 </div>
 
                 {/* QR Preview Box */}
-                <div className="my-4 p-3 bg-stone-50 border border-stone-200 rounded-xl flex items-center gap-3">
+                <div className="my-4 p-3.5 bg-[#FAF8F5] border border-stone-200 rounded-xl flex items-center gap-3.5">
                   {table.qr_code_url ? (
-                    <img
-                      src={table.qr_code_url}
-                      alt={`Table ${table.table_number} QR`}
-                      className="w-16 h-16 rounded-lg bg-white p-1 border border-stone-200"
-                    />
+                    <div className="relative group/qr shrink-0">
+                      <img
+                        src={table.qr_code_url}
+                        alt={`Table ${table.table_number} QR`}
+                        className="w-20 h-20 rounded-xl bg-white p-1.5 border border-stone-300 shadow-xs cursor-pointer hover:border-stone-900 transition-colors"
+                        onClick={() => setSelectedTableForPrint(table)}
+                        title="Click to view full standee & print preview"
+                      />
+                    </div>
                   ) : (
-                    <div className="w-16 h-16 rounded-lg bg-white border border-stone-200 flex items-center justify-center text-stone-400">
+                    <div className="w-20 h-20 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 shrink-0">
                       <QrCode className="w-8 h-8" />
                     </div>
                   )}
 
-                  <div className="text-xs space-y-1 min-w-0 flex-1">
-                    <p className="font-semibold text-stone-800 truncate">
-                      /menu/{cafe.slug}?table={table.table_number}
-                    </p>
-                    <p className="text-[11px] text-stone-500">
-                      Tenant: {cafe.slug} · Unique ID
-                    </p>
-                    <button
-                      onClick={() => onSelectTableForCustomerView(table.table_number)}
-                      className="text-amber-800 hover:text-amber-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer underline"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      <span>Test Customer View</span>
-                    </button>
+                  <div className="text-xs space-y-1.5 min-w-0 flex-1">
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-stone-900 truncate text-[11px]">
+                        /?mode=customer&table={table.table_number}
+                      </p>
+                      <p className="text-[10px] text-stone-500">
+                        Scan sends diner directly to Table #{table.table_number} ordering menu
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-1">
+                      <button
+                        onClick={() => onSelectTableForCustomerView(table.table_number)}
+                        className="text-amber-800 hover:text-amber-900 font-bold text-[11px] flex items-center gap-1 cursor-pointer underline"
+                        title="Simulate diner phone camera scan"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Simulate Scan</span>
+                      </button>
+
+                      {table.qr_code_url && (
+                        <button
+                          onClick={handleDownloadPNG}
+                          className="text-stone-600 hover:text-stone-900 font-semibold text-[11px] flex items-center gap-1 cursor-pointer"
+                          title="Download standalone PNG for table sticker"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>PNG</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -165,7 +212,7 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
                   className="flex-1 py-2 px-3 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  <span>Print Standee</span>
+                  <span>Print Standee Card</span>
                 </button>
 
                 {isOccupied || isBillRequested ? (
@@ -202,7 +249,7 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
               min={1}
               value={tableNumber}
               onChange={e => setTableNumber(e.target.value)}
-              placeholder="e.g. 6"
+              placeholder="e.g. 7"
               className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-200 focus:outline-hidden focus:border-stone-900"
             />
           </div>
@@ -213,7 +260,7 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
               type="text"
               value={tableName}
               onChange={e => setTableName(e.target.value)}
-              placeholder="e.g. Table 6 - Rooftop Garden"
+              placeholder="e.g. Table 7 - Rooftop Garden"
               className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-stone-200 focus:outline-hidden focus:border-stone-900"
             />
           </div>
@@ -243,11 +290,15 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
         </form>
       </Modal>
 
-      {/* Print Standee Modal */}
+      {/* Print Standee Modal (Single & Batch) */}
       <PrintQRModal
-        isOpen={Boolean(selectedTableForPrint)}
-        onClose={() => setSelectedTableForPrint(null)}
+        isOpen={Boolean(selectedTableForPrint) || isBatchPrintOpen}
+        onClose={() => {
+          setSelectedTableForPrint(null);
+          setIsBatchPrintOpen(false);
+        }}
         table={selectedTableForPrint}
+        allTables={tables}
         cafe={cafe}
       />
     </div>

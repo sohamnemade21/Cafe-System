@@ -183,7 +183,7 @@ export default function App() {
             <div className="flex items-center gap-1.5">
               <span className="hidden lg:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#C87D32]/25 text-[#E0A868] border border-[#C87D32]/40">
                 <ShieldCheck size={11} />
-                <span>{currentStaff.role} ({currentStaff.user_id || currentStaff.full_name.split(' ')[0]})</span>
+                <span>{currentStaff.role} ({currentStaff.user_id || currentStaff.full_name?.split(' ')[0] || currentStaff.email?.split('@')[0] || 'Staff'})</span>
               </span>
               <button
                 onClick={handleStaffLogout}
