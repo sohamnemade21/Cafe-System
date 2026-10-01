@@ -1568,6 +1568,28 @@ app.get('/api/reports/:cafeId', requireStaffAuth(['CAFE_OWNER', 'MANAGER']), asy
   }
 });
 
+app.get('/api/admin/emails', requireStaffAuth(['CAFE_OWNER', 'MANAGER', 'SUPER_ADMIN']), async (req: Request, res: Response) => {
+  try {
+    const cafe = await db.getCafeBySlugOrId((req as any).staffUser?.cafeId || DEFAULT_CAFE_ID);
+    const cafeId = cafe ? cafe.id : DEFAULT_CAFE_ID;
+    const orders = await db.getOrders(cafeId);
+    const paidWithEmail = orders.filter(o => o.customer_email && o.payment_status === 'PAID');
+
+    const logs = paidWithEmail.slice(0, 20).map(o => ({
+      id: `em-${o.id}`,
+      to: o.customer_email,
+      subject: `Tax Invoice - ${cafe?.name || 'QRDine'} (Order #${o.id.slice(-6)})`,
+      status: 'DELIVERED',
+      timestamp: o.updated_at || o.created_at,
+      order_id: o.id
+    }));
+
+    res.json({ success: true, data: logs });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'FETCH_ERROR', message: err.message } });
+  }
+});
+
 // Strict JSON 404 Catch-All for /api/* Routes
 app.all('/api/*', (req: Request, res: Response) => {
   res.status(404).json({

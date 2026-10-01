@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Cafe } from '../../types';
+import { api, getApiBaseUrl } from '../../services/api';
 import { ShieldCheck, Mail, CreditCard, Store, CheckCircle, Clock } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -10,10 +11,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ cafe }) => {
   const [emailLogs, setEmailLogs] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch('/api/admin/emails')
+    const token = api.getStaffToken();
+    fetch(`${getApiBaseUrl()}/admin/emails`, {
+      headers: {
+        'Accept': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+      }
+    })
       .then(res => res.json())
       .then(json => {
-        if (json.data) setEmailLogs(json.data);
+        if (json.data && Array.isArray(json.data)) setEmailLogs(json.data);
       })
       .catch(console.error);
   }, []);
