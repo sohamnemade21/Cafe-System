@@ -35,8 +35,6 @@ RUN npm ci --omit=dev --legacy-peer-deps && npm cache clean --force
 
 # Copy compiled bundles and static assets from builder stage
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/supabase ./supabase
 
 # Switch to standard non-root node user for container security
 USER node
@@ -46,7 +44,7 @@ EXPOSE 3000
 
 # Container Health Check (used by Docker, Kubernetes, AWS ECS, GCP Cloud Run)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/health || exit 1
 
 # Start the compiled ESM production server
 CMD ["node", "dist/server.js"]
