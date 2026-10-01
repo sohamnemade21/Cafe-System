@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Cafe, Order } from '../../types';
 import { api } from '../../services/api';
+import { buildRealtimeStreamUrl } from '../../utils/url';
 import { playOrderChime } from '../../utils/audio';
 import { ChefHat, Volume2, VolumeX, Maximize2, Minimize2, Clock, Check, AlertCircle, RefreshCw, LogOut, ArrowLeft } from 'lucide-react';
 import { StaffUser } from '../../types';
@@ -41,7 +42,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ cafe, onExit, cu
     loadOrders();
 
     // Listen to real-time events via SSE
-    const eventSource = new EventSource('/api/realtime/stream');
+    const eventSource = new EventSource(buildRealtimeStreamUrl());
 
     eventSource.addEventListener('new_order', (e: any) => {
       try {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CafeTable, Cafe } from '../../types';
+import { buildCustomerQRUrl } from '../../utils/url';
 import { Modal } from '../common/Modal';
 import { Printer, Download, QrCode, Sparkles, Smartphone, Utensils, CreditCard, Layers } from 'lucide-react';
 
@@ -138,7 +139,7 @@ export const PrintQRModal: React.FC<PrintQRModalProps> = ({
                   {/* High-Resolution QR Code Container */}
                   <div className="p-3.5 bg-white border-2 border-stone-200 rounded-2xl inline-block shadow-sm">
                     <img
-                      src={tbl.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(`${window.location.origin}/?mode=customer&cafe=${cafe.slug}&table=${tbl.table_number}`)}`}
+                      src={tbl.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(buildCustomerQRUrl(tbl.qr_token || ''))}`}
                       alt={`Scan QR Code for Table ${tbl.table_number}`}
                       className="w-48 h-48 mx-auto object-contain"
                     />
@@ -183,7 +184,7 @@ export const PrintQRModal: React.FC<PrintQRModalProps> = ({
 
                   <div className="p-2 bg-stone-50 border border-stone-200 rounded-xl inline-block">
                     <img
-                      src={tbl.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`${window.location.origin}/?mode=customer&cafe=${cafe.slug}&table=${tbl.table_number}`)}`}
+                      src={tbl.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(buildCustomerQRUrl(tbl.qr_token || ''))}`}
                       alt={`QR code for Table ${tbl.table_number}`}
                       className="w-32 h-32 mx-auto object-contain"
                     />

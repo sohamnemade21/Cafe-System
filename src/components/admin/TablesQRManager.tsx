@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Cafe, CafeTable } from '../../types';
 import { api } from '../../services/api';
+import { buildCustomerQRUrl } from '../../utils/url';
 import { PrintQRModal } from './PrintQRModal';
 import { Modal } from '../common/Modal';
 import { Plus, QrCode, Printer, RefreshCw, CheckCircle, ExternalLink, Users, Download } from 'lucide-react';
@@ -156,7 +157,7 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
                 <div className="my-4 p-3.5 bg-[#FAF8F5] border border-stone-200 rounded-xl flex items-center gap-3.5">
                   <div className="relative group/qr shrink-0">
                     <img
-                      src={table.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`${window.location.origin}/?mode=customer&cafe=${cafe.slug}&table=${table.table_number}`)}`}
+                      src={table.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(buildCustomerQRUrl(table.qr_token || ''))}`}
                       alt={`Table ${table.table_number} QR`}
                       className="w-20 h-20 rounded-xl bg-white p-1.5 border border-stone-300 shadow-xs cursor-pointer hover:border-stone-900 transition-colors object-contain"
                       onClick={() => setSelectedTableForPrint(table)}

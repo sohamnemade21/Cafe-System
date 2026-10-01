@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Cafe, CafeTable, MenuItem, MenuCategory, Order, StaffNotification } from '../../types';
 import { api } from '../../services/api';
+import { buildRealtimeStreamUrl } from '../../utils/url';
 import { LiveOrdersView } from './LiveOrdersView';
 import { TablesQRManager } from './TablesQRManager';
 import { MenuManager } from './MenuManager';
@@ -76,7 +77,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     loadData();
 
     // Subscribe to SSE updates
-    const eventSource = new EventSource('/api/realtime/stream');
+    const eventSource = new EventSource(buildRealtimeStreamUrl());
     eventSource.addEventListener('new_order', () => loadData());
     eventSource.addEventListener('order_status_updated', () => loadData());
     eventSource.addEventListener('waiter_called', () => loadData());

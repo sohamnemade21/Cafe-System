@@ -19,6 +19,10 @@ if (supabaseServer) {
   console.warn('⚠️ WARNING: Supabase is not configured. Real database persistence requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
 }
 
+export function getSupabaseServer(): SupabaseClient | null {
+  return supabaseServer;
+}
+
 // ==========================================
 // CORE DOMAIN TYPES
 // ==========================================
@@ -399,16 +403,29 @@ export const memoryCache = {
 // ==========================================
 
 export function getFrontendBaseUrl(explicitFrontendUrl?: string): string {
+  // If an explicit URL is provided and it's a valid frontend URL (not backend), use it
   if (explicitFrontendUrl && !explicitFrontendUrl.includes(':3000') && !explicitFrontendUrl.includes('onrender.com/api')) {
-    return explicitFrontendUrl.trim().replace(/\/+$/, '');
+    const clean = explicitFrontendUrl.trim().replace(/\/+$/, '');
+    if (clean) return clean;
   }
+
+  // Check environment variables
   const configured = (
     process.env.FRONTEND_URL ||
     process.env.VITE_APP_URL ||
-    (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173')
+    ''
   ).trim().replace(/\/+$/, '');
 
-  return configured || 'http://localhost:5173';
+  if (configured && !configured.includes(':3000') && !configured.includes('onrender.com/api')) {
+    return configured;
+  }
+
+  // Production must NEVER fall back to localhost
+  if (process.env.NODE_ENV === 'production') {
+    return 'https://cafe-system-jade.vercel.app';
+  }
+
+  return 'http://localhost:5173';
 }
 
 export async function generateTableQr(

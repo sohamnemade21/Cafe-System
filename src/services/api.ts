@@ -12,16 +12,10 @@ import {
   TableSession,
   ReceptionOverview
 } from '../types';
+import { getBackendApiUrl } from '../utils/url';
 
 export function getApiBaseUrl(): string {
-  if (typeof window !== 'undefined') {
-    const custom = (import.meta.env.VITE_API_URL || '').trim();
-    if (custom) {
-      return custom.replace(/\/+$/, '') + (custom.endsWith('/api') ? '' : '/api');
-    }
-    return '/api';
-  }
-  return (process.env.APP_URL ? process.env.APP_URL.replace(/\/+$/, '') + '/api' : 'http://localhost:3000/api');
+  return getBackendApiUrl();
 }
 
 const BASE_URL = getApiBaseUrl();

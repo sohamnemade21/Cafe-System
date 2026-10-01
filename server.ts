@@ -1,8 +1,10 @@
+// Side-effect import: loads .env BEFORE any other module evaluates (ESM hoisting safe)
+import 'dotenv/config';
+
 import http from 'http';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
-import dotenv from 'dotenv';
 import {
   db,
   supabaseServer,
@@ -37,8 +39,6 @@ import {
   sendEmail,
   generateInvoiceHtml
 } from './server/email.js';
-
-dotenv.config();
 
 const app = express();
 export const httpServer = http.createServer(app);
@@ -1699,8 +1699,8 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
 async function startServer() {
   await initializeDatabase();
-  const frontendUrl = (process.env.FRONTEND_URL || process.env.VITE_APP_URL || (isProd ? '' : 'http://localhost:5173')).trim().replace(/\/+$/, '');
-  await ensureTableQRs(frontendUrl);
+  // Pass undefined so getFrontendBaseUrl uses its own production-safe logic
+  await ensureTableQRs();
 
   httpServer.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`🚀 QRDine Server listening on 0.0.0.0:${PORT} [${isProd ? 'Production' : 'Development'}]`);

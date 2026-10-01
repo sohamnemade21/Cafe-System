@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Cafe, TableSessionSummary, StaffNotification, StaffUser, Order } from '../../types';
 import { api } from '../../services/api';
+import { buildRealtimeStreamUrl } from '../../utils/url';
 import { generateInvoicePDF } from '../../utils/pdfGenerator';
 import { playOrderChime } from '../../utils/audio';
 import {
@@ -82,7 +83,7 @@ export const ReceptionDashboard: React.FC<ReceptionDashboardProps> = ({
     loadReceptionData();
 
     // Listen to real-time events via SSE
-    const eventSource = new EventSource('/api/realtime/stream');
+    const eventSource = new EventSource(buildRealtimeStreamUrl());
 
     eventSource.addEventListener('new_order', () => {
       loadReceptionData();

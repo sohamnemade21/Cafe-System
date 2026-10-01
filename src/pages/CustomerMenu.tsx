@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Cafe, MenuItem, MenuCategory, CartItem, Customer, Order, Coupon, MenuItemVariant } from '../types';
 import { api } from '../services/api';
+import { buildRealtimeStreamUrl } from '../utils/url';
 import { Header } from '../components/customer/Header';
 import { CafeHero } from '../components/customer/CafeHero';
 import { CoffeePassModal } from '../components/customer/CoffeePassModal';
@@ -137,7 +138,7 @@ export const CustomerMenu: React.FC<CustomerMenuProps> = ({
   useEffect(() => {
     if (!currentOrder) return;
 
-    const eventSource = new EventSource('/api/realtime/stream');
+    const eventSource = new EventSource(buildRealtimeStreamUrl());
     eventSource.addEventListener('order_status_updated', (e: any) => {
       try {
         const payload = JSON.parse(e.data);
