@@ -7,6 +7,10 @@ import dotenv from 'dotenv';
 import QRCode from 'qrcode';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
@@ -55,9 +59,36 @@ const corsOptions = {
   ]
 };
 
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+// Security Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (isProd) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
+
+// Health Check Endpoints (for container orchestration, load balancers, and monitoring)
+app.get(['/health', '/api/health'], (req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    supabaseConnected: Boolean(supabaseServer),
+    version: '1.0.0'
+  });
+});
 
 // ==========================================
 // IN-MEMORY / PERSISTENT MULTI-TENANT STORE
@@ -3264,9 +3295,20 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    const distPath = path.resolve(process.cwd(), 'dist');
+    app.use(express.static(distPath, {
+      maxAge: isProd ? '1d' : 0,
+      setHeaders: (res, filePath) => {
+        if (filePath.includes(`${path.sep}assets${path.sep}`) || filePath.includes('/assets/')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      }
+    }));
+    app.get('*', (req: Request, res: Response, next: any) => {
+      if (req.path.startsWith('/api')) {
+        return next();
+      }
+      res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
 
@@ -3282,9 +3324,34 @@ async function startServer() {
     });
   });
 
-  httpServer.listen(Number(PORT) || 3000, '0.0.0.0', () => {
-    console.log(`QRDine Server running on ${APP_URL} (Port: ${PORT})`);
+  const serverInstance = httpServer.listen(Number(PORT) || 3000, '0.0.0.0', () => {
+    console.log(`QRDine Server running on ${APP_URL} (Port: ${PORT}) [Mode: ${isProd ? 'Production' : 'Development'}]`);
   });
+
+  // Graceful shutdown handling for container and process managers (Docker, Kubernetes, PM2)
+  const shutdown = (signal: string) => {
+    console.log(`Received ${signal}. Shutting down gracefully...`);
+    sseClients.forEach(client => {
+      try {
+        client.write(`data: ${JSON.stringify({ type: 'server_shutdown' })}\n\n`);
+        client.end();
+      } catch {}
+    });
+    sseClients.clear();
+
+    serverInstance.close(() => {
+      console.log('HTTP server closed successfully.');
+      process.exit(0);
+    });
+
+    setTimeout(() => {
+      console.error('Could not close connections in time, forcefully shutting down');
+      process.exit(1);
+    }, 10000);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer();
