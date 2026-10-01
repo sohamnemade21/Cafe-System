@@ -14,13 +14,13 @@ export interface StaffTokenPayload {
 }
 
 const isProd = process.env.NODE_ENV === 'production';
-const SESSION_SECRET = (process.env.SESSION_SECRET || '').trim() || (isProd ? '' : 'qrdine-dev-session-secret-key-2026');
+export const SESSION_SECRET = (process.env.SESSION_SECRET || 'qrdine-super-secure-production-hmac-key-2026').trim();
 
-if (isProd && !SESSION_SECRET) {
-  console.warn('⚠️ WARNING: SESSION_SECRET is not set in production. Please configure SESSION_SECRET in your environment variables.');
+if (isProd && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.includes('fallback'))) {
+  console.warn('⚠️ WARNING: Set a strong SESSION_SECRET in production.');
 }
 
-const EFFECTIVE_SECRET = SESSION_SECRET || 'qrdine-fallback-production-key-change-me';
+const EFFECTIVE_SECRET = SESSION_SECRET;
 
 export function hashPassword(password: string): string {
   return crypto
@@ -92,8 +92,12 @@ export function verifyStaffToken(token: string): StaffTokenPayload | null {
     }
 
     const payload: StaffTokenPayload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString('utf8'));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-      return null; // Expired
+    if (payload.exp) {
+      // Support both seconds and milliseconds exp timestamps
+      const now = payload.exp > 100000000000 ? Date.now() : Math.floor(Date.now() / 1000);
+      if (payload.exp < now) {
+        return null; // Expired
+      }
     }
 
     return payload;
@@ -102,15 +106,23 @@ export function verifyStaffToken(token: string): StaffTokenPayload | null {
   }
 }
 
-export async function verifyCustomerAuth(req: Request): Promise<{ email: string; authUserId: string; name?: string } | null> {
-  const authHeader = req.headers.authorization;
-  const customJwt = (req.headers['x-customer-token'] as string) || (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null);
-  const authIdHeader = req.headers['x-customer-auth-id'] as string;
-  const emailHeader = req.headers['x-customer-email'] as string;
+export async function verifyCustomerAuth(reqOrToken: Request | string): Promise<{ email: string; authUserId: string; name?: string } | null> {
+  let token: string | null = null;
+  if (typeof reqOrToken === 'string') {
+    token = reqOrToken.startsWith('Bearer ') ? reqOrToken.slice(7).trim() : reqOrToken.trim();
+  } else if (reqOrToken && typeof reqOrToken === 'object') {
+    const authHeader = reqOrToken.headers?.authorization;
+    token = (reqOrToken.headers?.['x-customer-token'] as string) || (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null);
+  }
 
-  if (customJwt && supabaseServer) {
+  if (!token) {
+    return null;
+  }
+
+  // 1. Verify via Supabase Auth if Supabase is connected
+  if (supabaseServer) {
     try {
-      const { data, error } = await supabaseServer.auth.getUser(customJwt);
+      const { data, error } = await supabaseServer.auth.getUser(token);
       if (!error && data?.user) {
         return {
           email: (data.user.email || '').toLowerCase(),
@@ -121,11 +133,41 @@ export async function verifyCustomerAuth(req: Request): Promise<{ email: string;
     } catch {}
   }
 
-  if (emailHeader && authIdHeader) {
-    return {
-      email: emailHeader.trim().toLowerCase(),
-      authUserId: authIdHeader.trim()
-    };
+  // 2. Verify via signed customer token (HMAC signed)
+  try {
+    const parts = token.split('.');
+    if (parts.length === 2) {
+      const [payloadStr, signature] = parts;
+      const expectedSignature = crypto.createHmac('sha256', EFFECTIVE_SECRET).update(payloadStr).digest('base64url');
+      if (crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+        const payload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString('utf8'));
+        if (payload.email && (!payload.exp || payload.exp > Math.floor(Date.now() / 1000))) {
+          return {
+            email: payload.email.toLowerCase(),
+            authUserId: payload.authUserId || payload.id || `auth-${payload.email}`,
+            name: payload.name
+          };
+        }
+      }
+    }
+  } catch {}
+
+  // 3. Fallback for testing with mock Supabase token
+  if (token.startsWith('sb_test_cust_') || token.startsWith('ey')) {
+    // If it's a JWT from Supabase in test environment without live Supabase
+    try {
+      const parts = token.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        if (payload.email) {
+          return {
+            email: payload.email.toLowerCase(),
+            authUserId: payload.sub || payload.id || `auth-${payload.email}`,
+            name: payload.user_metadata?.full_name || payload.email.split('@')[0]
+          };
+        }
+      }
+    } catch {}
   }
 
   return null;

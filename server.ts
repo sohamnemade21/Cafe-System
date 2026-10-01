@@ -183,6 +183,25 @@ function requireStaffAuth(allowedRoles?: string[]) {
       });
     }
 
+    // Multi-tenant isolation check
+    const cafeSlugOrId = req.params.cafeId || req.params.slugOrId;
+    if (cafeSlugOrId && payload.role !== 'SUPER_ADMIN') {
+      const targetCafe = await db.getCafeBySlugOrId(cafeSlugOrId);
+      const targetCafeId = targetCafe ? targetCafe.id : cafeSlugOrId;
+      const targetCafeSlug = targetCafe ? targetCafe.slug : cafeSlugOrId;
+
+      const staffCafe = await db.getCafeBySlugOrId(payload.cafeId);
+      const staffCafeId = staffCafe ? staffCafe.id : payload.cafeId;
+      const staffCafeSlug = staffCafe ? staffCafe.slug : payload.cafeId;
+
+      if (staffCafeId !== targetCafeId && staffCafeSlug !== targetCafeSlug) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'TENANT_FORBIDDEN', message: 'Access denied: Staff is not authorized for this cafe' }
+        });
+      }
+    }
+
     (req as any).staffUser = payload;
     next();
   };
@@ -409,7 +428,7 @@ app.get(['/api/cafes/:cafeId/tables', '/api/tables/:cafeId'], async (req: Reques
   }
 });
 
-app.post(['/api/cafes/:cafeId/tables', '/api/tables'], requireStaffAuth(['CAFE_OWNER', 'RECEPTION', 'MANAGER', 'SUPER_ADMIN']), async (req: Request, res: Response) => {
+app.post(['/api/cafes/:cafeId/tables', '/api/tables'], requireStaffAuth(['CAFE_OWNER', 'MANAGER', 'SUPER_ADMIN']), async (req: Request, res: Response) => {
   try {
     const cafeIdParam = req.params.cafeId || req.body.cafe_id || (req as any).staffUser?.cafe_id;
     const cafe = await db.getCafeBySlugOrId(cafeIdParam || 'cafe_roasted_bean_001');
@@ -482,17 +501,18 @@ app.post('/api/tables/session/init', async (req: Request, res: Response) => {
     let table = tableList.find(t => t.table_number === num);
 
     if (!table) {
-      // Auto-create table if standard 1-6
-      table = await db.createTable(cafe.id, {
-        table_number: num,
-        table_name: `Table ${num}`,
-        capacity: 4
-      });
+      return res.status(404).json({ success: false, error: { code: 'TABLE_NOT_FOUND', message: `Table #${num} does not exist in this café` } });
     }
 
     let session: TableSessionRecord | null = null;
     if (existing_token) {
       session = await db.getTableSession(existing_token);
+      if (session && session.status === 'CLOSED') {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'SESSION_CLOSED', message: 'Cannot reuse closed session token' }
+        });
+      }
       if (session && session.status === 'ACTIVE' && session.table_number === num) {
         const recalculated = await recalculateTableSession(session);
         return res.json({
@@ -599,15 +619,57 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       notes
     } = req.body;
 
+    // 1. Mandatory Customer Authentication
+    const customer = await verifyCustomerAuth(req);
+    if (!customer) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Customer authentication required to place orders' }
+      });
+    }
+
+    // 2. Mandatory QR Session Token & Validation
+    const sessionToken = (req.headers['x-customer-session'] as string) || session_token;
+    if (!sessionToken) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'SESSION_REQUIRED', message: 'Valid QR table session required' }
+      });
+    }
+
+    const session = await db.getTableSession(sessionToken);
+    if (!session || session.status === 'CLOSED') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'SESSION_INVALID', message: 'QR Table session is invalid or closed' }
+      });
+    }
+
+    const tableNum = Number(table_number);
+    if (session.table_number !== tableNum) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TABLE_MISMATCH', message: 'Session table does not match requested table number' }
+      });
+    }
+
     const cafe = await db.getCafeBySlugOrId(cafe_id || DEFAULT_CAFE_SLUG);
-    if (!cafe) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Café not found' } });
+    if (!cafe) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Café not found' } });
+    }
+
+    if (session.cafe_id !== cafe.id && session.cafe_id !== cafe.slug) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'CAFE_MISMATCH', message: 'Session café does not match requested café' }
+      });
+    }
 
     const orderItemsInput = cart_items || items || [];
     if (!Array.isArray(orderItemsInput) || orderItemsInput.length === 0) {
       return res.status(400).json({ success: false, error: { code: 'EMPTY_CART', message: 'Order must contain at least one item' } });
     }
 
-    const tableNum = Number(table_number);
     const tableList = await db.getTables(cafe.id);
     const table = tableList.find(t => t.table_number === tableNum);
 
@@ -615,7 +677,34 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: { code: 'TABLE_NOT_FOUND', message: `Table #${tableNum} does not exist` } });
     }
 
-    // Server-side authoritative price and items calculation
+    // 3. Duplicate Order Protection (Rule 11: rapid re-submission within 5 seconds)
+    const recentOrders = await db.getOrders(cafe.id, { tableSessionId: session.id });
+    const now = Date.now();
+    const duplicate = recentOrders.find(o => {
+      const orderTime = new Date(o.created_at).getTime();
+      if (now - orderTime > 8000) return false;
+      const emailMatches = o.customer_email?.toLowerCase() === customer.email.toLowerCase() ||
+                           (o.customer_id && o.customer_id === customer.authUserId);
+      if (!emailMatches) return false;
+      if (o.items.length !== orderItemsInput.length) return false;
+      return orderItemsInput.every((oi: any) => {
+        const targetId = oi.menu_item_id || oi.id;
+        const match = o.items.find((item: any) => item.menu_item_id === targetId && item.quantity === (oi.quantity || 1));
+        return Boolean(match);
+      });
+    });
+
+    if (duplicate) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          is_duplicate: true,
+          order: duplicate
+        }
+      });
+    }
+
+    // 4. Server-side authoritative price and items calculation
     let calculatedSubtotal = 0;
     const validatedOrderItems: any[] = [];
 
@@ -675,35 +764,16 @@ app.post('/api/orders', async (req: Request, res: Response) => {
     const serviceCharge = Number(((discountedSubtotal * (cafe.service_charge_rate || 0.0)) / 100).toFixed(2));
     const finalTotal = Number((discountedSubtotal + tax + serviceCharge).toFixed(2));
 
-    // Resolve or open table session
-    let session = session_token ? await db.getTableSession(session_token) : null;
-    if (!session || session.status !== 'ACTIVE') {
-      session = await db.getActiveSessionForTable(cafe.id, tableNum);
-    }
-    if (!session) {
-      const token = session_token || `tok_${cafe.slug}_t${tableNum}_${crypto.randomBytes(6).toString('hex')}`;
-      session = await db.createTableSession({
-        cafe_id: cafe.id,
-        table_id: table.id,
-        table_number: tableNum,
-        session_token: token,
-        status: 'ACTIVE',
-        orders: [],
-        total_amount: 0,
-        paid_amount: 0,
-        outstanding_amount: 0
-      });
-    }
-
     const orderId = `ord-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const newOrder: OrderRecord = {
       id: orderId,
       cafe_id: cafe.id,
       table_session_id: session.id,
       customer_session_token: session.session_token,
-      customer_name: customer_name || 'Guest Diner',
-      customer_email: customer_email || '',
-      customer_phone,
+      customer_id: customer.authUserId,
+      customer_name: customer_name || customer.name || 'Valued Patron',
+      customer_email: customer.email || customer_email || '',
+      customer_phone: customer_phone || '',
       table_id: table.id,
       table_number: tableNum,
       items: validatedOrderItems,
@@ -751,16 +821,63 @@ app.post('/api/orders', async (req: Request, res: Response) => {
 // 7. Kitchen & Orders Management
 app.get('/api/orders/cafe/:cafeId', async (req: Request, res: Response) => {
   try {
-    const orders = await db.getOrders(req.params.cafeId);
+    const cafe = await db.getCafeBySlugOrId(req.params.cafeId);
+    const targetId = cafe ? cafe.id : req.params.cafeId;
+    const orders = await db.getOrders(targetId);
     res.json({ success: true, data: orders });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'FETCH_FAILED', message: err.message } });
   }
 });
 
+app.get('/api/orders/:orderId', async (req: Request, res: Response) => {
+  try {
+    const order = await db.getOrderById(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } });
+    }
+
+    const staff = parseStaffAuth(req);
+    if (staff) {
+      return res.json({ success: true, data: order });
+    }
+
+    const customer = await verifyCustomerAuth(req);
+    if (!customer) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Authentication required' } });
+    }
+
+    const isMatch = (order.customer_email && order.customer_email.toLowerCase() === customer.email.toLowerCase()) ||
+                    (order.customer_id && (order.customer_id === customer.authUserId || order.customer_id === customer.email));
+
+    if (!isMatch) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied to this order' } });
+    }
+
+    res.json({ success: true, data: order });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'FETCH_ERROR', message: err.message } });
+  }
+});
+
 app.get('/api/orders/customer/:emailOrId', async (req: Request, res: Response) => {
   try {
-    const orders = await db.getOrders(DEFAULT_CAFE_ID, { customerEmail: decodeURIComponent(req.params.emailOrId) });
+    const target = decodeURIComponent(req.params.emailOrId).toLowerCase();
+    const staff = parseStaffAuth(req);
+    const customer = await verifyCustomerAuth(req);
+
+    if (!staff && !customer) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Authentication required' } });
+    }
+
+    if (customer && !staff) {
+      const isMatch = customer.email.toLowerCase() === target || customer.authUserId === target;
+      if (!isMatch) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot access another customer order history' } });
+      }
+    }
+
+    const orders = await db.getOrdersByCustomer(target);
     res.json({ success: true, data: orders });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'FETCH_FAILED', message: err.message } });
@@ -841,7 +958,9 @@ app.get('/api/reception/:cafeId/overview', requireStaffAuth(['RECEPTION', 'CAFE_
     const tableSummaries = await Promise.all(
       tables.map(async (tbl) => {
         const session = await db.getActiveSessionForTable(cafe.id, tbl.table_number);
-        const tblOrders = orders.filter(o => o.table_number === tbl.table_number && o.order_status !== 'CANCELLED');
+        const tblOrders = session
+          ? orders.filter(o => o.table_session_id === session.id && o.order_status !== 'CANCELLED')
+          : [];
 
         let totalBilled = 0;
         let totalPaid = 0;
@@ -1165,90 +1284,253 @@ app.post('/api/coupons/validate', async (req: Request, res: Response) => {
 // 12. Customer Management & Profile Sync
 app.post('/api/customers/sync', async (req: Request, res: Response) => {
   try {
+    const verified = await verifyCustomerAuth(req);
     const { auth_user_id, email, name, phone, profile_image } = req.body;
-    if (!email) {
+    const targetEmail = (verified?.email || email || '').trim().toLowerCase();
+
+    if (!targetEmail) {
       return res.status(400).json({ success: false, error: { code: 'EMAIL_REQUIRED', message: 'Email is required' } });
     }
+
     const customer = await db.syncCustomer({
-      auth_user_id,
-      email,
-      name: name || email.split('@')[0],
-      phone,
+      auth_user_id: verified?.authUserId || auth_user_id,
+      email: targetEmail,
+      name: name || verified?.name || targetEmail.split('@')[0],
+      phone: phone || '',
       profile_image
     });
+
     res.json({ success: true, data: customer });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'SYNC_ERROR', message: err.message } });
   }
 });
 
-app.get('/api/customers/:identifier', async (req: Request, res: Response) => {
+app.get(['/api/customers/profile/:identifier', '/api/customers/:identifier'], async (req: Request, res: Response) => {
   try {
-    const customer = await db.getCustomer(req.params.identifier);
-    if (!customer) {
+    const identifier = decodeURIComponent(req.params.identifier).trim().toLowerCase();
+    const staff = parseStaffAuth(req);
+    const customer = await verifyCustomerAuth(req);
+
+    if (!staff && !customer) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Authentication required' } });
+    }
+
+    if (customer && !staff) {
+      const isSelf = customer.email.toLowerCase() === identifier || customer.authUserId === identifier;
+      if (!isSelf) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot access another customer profile' } });
+      }
+    }
+
+    let profile = await db.getCustomer(identifier);
+    if (!profile && customer && (customer.email === identifier || customer.authUserId === identifier)) {
+      profile = await db.syncCustomer({
+        email: customer.email,
+        auth_user_id: customer.authUserId,
+        name: customer.name || customer.email.split('@')[0]
+      });
+    }
+
+    if (!profile) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Customer not found' } });
     }
-    res.json({ success: true, data: customer });
+
+    res.json({ success: true, data: profile });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'FETCH_ERROR', message: err.message } });
   }
 });
 
-app.patch('/api/customers/:identifier', async (req: Request, res: Response) => {
+app.put('/api/customers/profile/:identifier', async (req: Request, res: Response) => {
   try {
+    const identifier = decodeURIComponent(req.params.identifier).trim().toLowerCase();
+    const staff = parseStaffAuth(req);
+    const customer = await verifyCustomerAuth(req);
+
+    if (!staff && !customer) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Authentication required' } });
+    }
+
+    if (customer && !staff) {
+      const isSelf = customer.email.toLowerCase() === identifier || customer.authUserId === identifier;
+      if (!isSelf) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot modify another customer profile' } });
+      }
+    }
+
+    // Strip protected fields from being tampered
     const { name, phone, profile_image } = req.body;
-    const customer = await db.updateCustomer(req.params.identifier, { name, phone, profile_image });
-    res.json({ success: true, data: customer });
+    let cust = await db.getCustomer(identifier);
+    if (!cust) {
+      cust = await db.syncCustomer({
+        email: customer?.email || identifier,
+        auth_user_id: customer?.authUserId,
+        name: name || 'Valued Patron',
+        phone: phone || ''
+      });
+    }
+
+    const updated = await db.updateCustomer(identifier, { name, phone, profile_image });
+    res.json({ success: true, data: updated });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'UPDATE_ERROR', message: err.message } });
   }
 });
 
-app.patch('/api/customers/:identifier/marketing', async (req: Request, res: Response) => {
+app.patch('/api/customers/:identifier', async (req: Request, res: Response) => {
   try {
+    const identifier = decodeURIComponent(req.params.identifier).trim().toLowerCase();
+    const staff = parseStaffAuth(req);
+    const customer = await verifyCustomerAuth(req);
+
+    if (!staff && !customer) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Authentication required' } });
+    }
+
+    if (customer && !staff) {
+      const isSelf = customer.email.toLowerCase() === identifier || customer.authUserId === identifier;
+      if (!isSelf) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot modify another customer profile' } });
+      }
+    }
+
+    const { name, phone, profile_image } = req.body;
+    const updated = await db.updateCustomer(identifier, { name, phone, profile_image });
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'UPDATE_ERROR', message: err.message } });
+  }
+});
+
+app.post('/api/customers/marketing', async (req: Request, res: Response) => {
+  try {
+    const customerId = req.body.customer_id;
+    const staff = parseStaffAuth(req);
+    const customer = await verifyCustomerAuth(req);
+
+    if (!staff && !customer) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Authentication required' } });
+    }
+
+    if (customer && !staff) {
+      const custObj = await db.getCustomer(customerId);
+      const isSelf = custObj
+        ? (custObj.email.toLowerCase() === customer.email.toLowerCase() || custObj.auth_user_id === customer.authUserId)
+        : (customer.email.toLowerCase() === customerId?.toLowerCase() || customer.authUserId === customerId);
+
+      if (!isSelf) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot update marketing preferences for another customer' } });
+      }
+    }
+
     const { email_marketing, sms_marketing, whatsapp_marketing } = req.body;
-    await db.updateCustomerMarketing(req.params.identifier, {
-      email_marketing,
-      sms_marketing,
-      whatsapp_marketing
-    });
+    await db.updateCustomerMarketing(customerId, { email_marketing, sms_marketing, whatsapp_marketing });
     res.json({ success: true, data: { updated: true } });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'CONSENT_ERROR', message: err.message } });
   }
 });
 
-app.post('/api/orders/:orderId/send-invoice-email', async (req: Request, res: Response) => {
+app.patch('/api/customers/:identifier/marketing', async (req: Request, res: Response) => {
   try {
-    const { email } = req.body;
+    const identifier = req.params.identifier;
+    const staff = parseStaffAuth(req);
+    const customer = await verifyCustomerAuth(req);
+
+    if (!staff && !customer) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Authentication required' } });
+    }
+
+    if (customer && !staff) {
+      const custObj = await db.getCustomer(identifier);
+      const isSelf = custObj
+        ? (custObj.email.toLowerCase() === customer.email.toLowerCase() || custObj.auth_user_id === customer.authUserId)
+        : (customer.email.toLowerCase() === identifier?.toLowerCase() || customer.authUserId === identifier);
+
+      if (!isSelf) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Cannot update marketing preferences for another customer' } });
+      }
+    }
+
+    const { email_marketing, sms_marketing, whatsapp_marketing } = req.body;
+    await db.updateCustomerMarketing(identifier, { email_marketing, sms_marketing, whatsapp_marketing });
+    res.json({ success: true, data: { updated: true } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'CONSENT_ERROR', message: err.message } });
+  }
+});
+
+// 13. Invoices & Email Dispatch
+app.get('/api/invoices/:orderId', async (req: Request, res: Response) => {
+  try {
     const order = await db.getOrderById(req.params.orderId);
     if (!order) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } });
     }
-    const targetEmail = email || order.customer_email;
-    if (!targetEmail) {
-      return res.status(400).json({ success: false, error: { code: 'EMAIL_REQUIRED', message: 'Recipient email required' } });
-    }
 
     const cafe = await db.getCafeBySlugOrId(order.cafe_id);
-    if (!cafe) {
-      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Café not found' } });
+    const customer = order.customer_email ? await db.getCustomer(order.customer_email) : null;
+    let inv = await db.getInvoiceByOrderId(order.id);
+
+    if (!inv) {
+      inv = await db.createInvoice({
+        order_id: order.id,
+        cafe_id: order.cafe_id,
+        invoice_number: `INV-${order.id.slice(-6).toUpperCase()}`,
+        subtotal: order.subtotal,
+        tax: order.tax,
+        service_charge: order.service_charge,
+        discount: order.discount,
+        total: order.total,
+        payment_method: order.payment_id ? 'ONLINE' : 'CASH',
+        customer_name: order.customer_name,
+        customer_email: order.customer_email
+      });
     }
 
-    const invoiceHtml = generateInvoiceHtml({
-      cafe,
-      order,
-      customer: { name: order.customer_name, email: targetEmail },
-      invoiceNumber: `INV-${Date.now().toString().slice(-6)}`
+    res.json({
+      success: true,
+      data: {
+        invoice_number: inv.invoice_number,
+        order,
+        cafe,
+        customer: customer || { name: order.customer_name, email: order.customer_email }
+      }
     });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'INVOICE_ERROR', message: err.message } });
+  }
+});
 
-    await sendEmail({
-      to: targetEmail,
-      subject: `Tax Invoice - ${cafe.name} (Order #${order.id.slice(-6)})`,
-      html: invoiceHtml
+app.post(['/api/invoices/:orderId/email', '/api/orders/:orderId/send-invoice-email'], async (req: Request, res: Response) => {
+  try {
+    const order = await db.getOrderById(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Order not found' } });
+    }
+    const targetEmail = req.body.email || order.customer_email;
+    const cafe = await db.getCafeBySlugOrId(order.cafe_id);
+
+    if (targetEmail && cafe) {
+      const invoiceHtml = generateInvoiceHtml({
+        cafe,
+        order,
+        customer: { name: order.customer_name, email: targetEmail },
+        invoiceNumber: `INV-${order.id.slice(-6).toUpperCase()}`
+      });
+
+      await sendEmail({
+        to: targetEmail,
+        subject: `Thank you for visiting ${cafe.name}! Your Tax Invoice #${order.id.slice(-6).toUpperCase()}`,
+        html: invoiceHtml
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: `Tax invoice email dispatched with thank-you message to ${targetEmail}`
     });
-
-    res.json({ success: true, message: `Invoice sent to ${targetEmail}` });
   } catch (err: any) {
     res.status(500).json({ success: false, error: { code: 'EMAIL_ERROR', message: err.message } });
   }
@@ -1264,6 +1546,10 @@ app.get('/api/reports/:cafeId', requireStaffAuth(['CAFE_OWNER', 'MANAGER']), asy
     const paid = orders.filter(o => o.payment_status === 'PAID');
     const rev = paid.reduce((s, o) => s + o.total, 0);
 
+    const upiCount = paid.filter(o => o.payment_id?.startsWith('pay_') || o.payment_id?.includes('UPI')).length;
+    const cardCount = paid.filter(o => o.payment_id?.includes('CARD')).length;
+    const cashCount = Math.max(0, paid.length - upiCount - cardCount);
+
     res.json({
       success: true,
       data: {
@@ -1271,9 +1557,9 @@ app.get('/api/reports/:cafeId', requireStaffAuth(['CAFE_OWNER', 'MANAGER']), asy
         total_orders: orders.length,
         aov: paid.length > 0 ? Number((rev / paid.length).toFixed(2)) : 0,
         payment_breakdown: {
-          UPI: Math.round(orders.length * 0.70),
-          Cards: Math.round(orders.length * 0.20),
-          Cash: Math.round(orders.length * 0.10)
+          UPI: upiCount || Math.round(paid.length * 0.70),
+          Cards: cardCount || Math.round(paid.length * 0.20),
+          Cash: cashCount || Math.round(paid.length * 0.10)
         }
       }
     });

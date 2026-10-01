@@ -199,6 +199,21 @@ export const memoryCache = {
       tax_rate: 5.0,
       service_charge_rate: 2.5,
       is_active: true
+    },
+    {
+      id: 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a22',
+      slug: 'cafe-bella-italia',
+      name: 'Bella Italia Trattoria',
+      tag_line: 'Authentic Woodfired Pizza & Artisan Gelato',
+      logo_url: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=200&auto=format&fit=crop&q=80',
+      address: '12 Lavelle Road, Bengaluru, KA 560001',
+      phone: '+91 98765 11223',
+      email: 'ciao@bellaitalia.in',
+      gst_number: '29BBBBB0000B1Z6',
+      currency: '₹',
+      tax_rate: 5.0,
+      service_charge_rate: 5.0,
+      is_active: true
     }
   ],
   categories: [
@@ -320,12 +335,59 @@ export const memoryCache = {
     { id: 'tbl-rb-6', cafe_id: DEFAULT_CAFE_ID, table_number: 6, table_name: 'Table 6 - Espresso Bar', capacity: 2, qr_code_url: '', status: 'FREE' }
   ] as TableRecord[],
   tableSessions: [] as TableSessionRecord[],
-  orders: [] as OrderRecord[],
+  orders: [
+    {
+      id: 'ord-101',
+      cafe_id: DEFAULT_CAFE_ID,
+      table_session_id: 'ts-sample-101',
+      customer_session_token: 'tok_sample_101',
+      customer_id: 'cust-demo-1',
+      customer_name: 'Aditi V',
+      customer_email: 'aditi.v@example.com',
+      table_id: 'tbl-rb-1',
+      table_number: 1,
+      items: [
+        {
+          id: 'oi-sample-101',
+          menu_item_id: 'item-cappuccino',
+          item_name: 'Artisan Velvet Cappuccino',
+          unit_price: 240,
+          quantity: 1,
+          selected_variants_json: [],
+          subtotal: 240
+        }
+      ],
+      subtotal: 240,
+      tax: 12,
+      service_charge: 6,
+      discount: 0,
+      total: 258,
+      payment_status: 'PAID',
+      order_status: 'SERVED',
+      created_at: new Date(Date.now() - 3600000).toISOString(),
+      updated_at: new Date(Date.now() - 3600000).toISOString()
+    }
+  ] as OrderRecord[],
   coupons: [
     { id: 'cp-welcome20', cafe_id: DEFAULT_CAFE_ID, code: 'WELCOME20', description: '20% off on your first dine-in order', discount_type: 'PERCENTAGE', discount_value: 20.0, minimum_order: 300.0, usage_limit: 500, usage_count: 0, status: 'ACTIVE' },
     { id: 'cp-flat50', cafe_id: DEFAULT_CAFE_ID, code: 'FLAT50', description: 'Flat ₹50 off on orders above ₹400', discount_type: 'FIXED', discount_value: 50.0, minimum_order: 400.0, usage_limit: 1000, usage_count: 0, status: 'ACTIVE' }
   ],
-  customers: [] as any[],
+  customers: [
+    {
+      id: 'cust-demo-1',
+      auth_user_id: 'auth-aditi-v',
+      email: 'aditi.v@example.com',
+      name: 'Aditi V',
+      phone: '+91 98450 11223',
+      profile_image: '',
+      total_orders: 1,
+      total_spent: 258,
+      marketing: { email_marketing: true, sms_marketing: false, whatsapp_marketing: true },
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+      updated_at: new Date(Date.now() - 86400000).toISOString()
+    }
+  ] as any[],
+  invoices: [] as any[],
   notifications: [] as any[],
   auditLogs: [] as any[],
   staffUsers: [...INITIAL_STAFF_USERS]
@@ -477,15 +539,21 @@ export const db = {
 
   async getCafeBySlugOrId(identifier: string) {
     if (!identifier) return null;
+    const clean = identifier.trim().toLowerCase();
+    const cleanAlt = clean.startsWith('cafe-') ? clean.slice(5) : `cafe-${clean}`;
+
     if (supabaseServer) {
       const { data, error } = await supabaseServer
         .from('cafes')
         .select('*')
-        .or(`slug.eq.${identifier},id.eq.${identifier}`)
+        .or(`slug.ilike.${clean},slug.ilike.${cleanAlt},id.eq.${identifier}`)
         .maybeSingle();
       if (!error && data) return data;
     }
-    return memoryCache.cafes.find(c => c.slug === identifier || c.id === identifier) || null;
+
+    return memoryCache.cafes.find(
+      c => c.slug.toLowerCase() === clean || c.slug.toLowerCase() === cleanAlt || c.id === identifier
+    ) || null;
   },
 
   // --- MENU CATEGORIES ---
@@ -730,7 +798,7 @@ export const db = {
     }
 
     const qrCodeUrl = await generateTableQrDataUrl(cafe.slug, num);
-    const newId = `tbl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newId = crypto.randomUUID();
 
     const newTable: TableRecord = {
       id: newId,
@@ -743,22 +811,28 @@ export const db = {
     };
 
     if (supabaseServer) {
-      const { data: created, error } = await supabaseServer
-        .from('tables')
-        .insert({
-          id: newTable.id,
-          cafe_id: newTable.cafe_id,
-          table_number: newTable.table_number,
-          table_name: newTable.table_name,
-          capacity: newTable.capacity,
-          qr_code_url: newTable.qr_code_url,
-          status: 'FREE'
-        })
-        .select()
-        .single();
+      try {
+        const { data: created, error } = await supabaseServer
+          .from('tables')
+          .insert({
+            id: newTable.id,
+            cafe_id: newTable.cafe_id,
+            table_number: newTable.table_number,
+            table_name: newTable.table_name,
+            capacity: newTable.capacity,
+            qr_code_url: newTable.qr_code_url,
+            status: 'FREE'
+          })
+          .select()
+          .single();
 
-      if (error) throw new Error(`Supabase table creation error: ${error.message}`);
-      if (created) return created;
+        if (!error && created) {
+          memoryCache.tables.push(created);
+          return created;
+        }
+      } catch (err) {
+        console.warn('Supabase table insert fallback to cache:', err);
+      }
     }
 
     memoryCache.tables.push(newTable);
@@ -843,7 +917,7 @@ export const db = {
       }
     }
 
-    return memoryCache.tableSessions.find(
+    return memoryCache.tableSessions.slice().reverse().find(
       s => (s.cafe_id === targetId || s.cafe_id === cafe?.slug) && s.table_number === tableNumber && s.status === 'ACTIVE'
     ) || null;
   },
@@ -1022,6 +1096,61 @@ export const db = {
       Object.assign(order, updates, { updated_at: new Date().toISOString() });
     }
     return order || null;
+  },
+
+  async getOrdersByCustomer(emailOrAuthId: string) {
+    if (!emailOrAuthId) return [];
+    const lower = emailOrAuthId.trim().toLowerCase();
+
+    if (supabaseServer) {
+      const { data, error } = await supabaseServer
+        .from('orders')
+        .select('*, order_items(*)')
+        .or(`customer_email.ilike.${lower},customer_id.eq.${emailOrAuthId}`)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        return data.map((o: any) => ({
+          ...o,
+          items: o.order_items || []
+        }));
+      }
+    }
+
+    return memoryCache.orders.filter(
+      o => o.customer_email?.toLowerCase() === lower || o.customer_id === emailOrAuthId
+    );
+  },
+
+  // --- INVOICES ---
+  async createInvoice(invoiceData: { order_id: string; cafe_id: string; invoice_number: string; subtotal: number; tax: number; service_charge: number; discount: number; total: number; payment_method?: string; customer_name?: string; customer_email?: string; metadata_json?: any }) {
+    const newInv = {
+      id: `inv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      created_at: new Date().toISOString(),
+      ...invoiceData
+    };
+
+    if (supabaseServer) {
+      try {
+        await supabaseServer.from('invoices').insert(newInv);
+      } catch {}
+    }
+
+    memoryCache.invoices.unshift(newInv);
+    return newInv;
+  },
+
+  async getInvoiceByOrderId(orderId: string) {
+    if (supabaseServer) {
+      const { data, error } = await supabaseServer
+        .from('invoices')
+        .select('*')
+        .eq('order_id', orderId)
+        .maybeSingle();
+      if (!error && data) return data;
+    }
+
+    return memoryCache.invoices.find(i => i.order_id === orderId) || null;
   },
 
   // --- STAFF USERS ---
