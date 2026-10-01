@@ -60,8 +60,8 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
   const activeStep = currentStatusIndex !== -1 ? currentStatusIndex : 0;
   const isPaid = order.payment_status === 'PAID';
 
-  const handleDownloadInvoice = () => {
-    const doc = generateInvoicePDF(order, cafe);
+  const handleDownloadInvoice = async () => {
+    const doc = await generateInvoicePDF(order, cafe);
     doc.save(`Invoice_${cafe.slug}_Order_${order.id.slice(-6)}.pdf`);
   };
 

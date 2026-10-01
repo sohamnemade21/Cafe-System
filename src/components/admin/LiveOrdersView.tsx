@@ -32,8 +32,8 @@ export const LiveOrdersView: React.FC<LiveOrdersViewProps> = ({
     }
   };
 
-  const handleDownloadInvoice = (ord: Order) => {
-    const doc = generateInvoicePDF(ord, cafe);
+  const handleDownloadInvoice = async (ord: Order) => {
+    const doc = await generateInvoicePDF(ord, cafe);
     doc.save(`Invoice_${cafe.slug}_Order_${ord.id.slice(-6)}.pdf`);
   };
 

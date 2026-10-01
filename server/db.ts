@@ -398,14 +398,27 @@ export const memoryCache = {
 // QR CODE GENERATOR UTILITY (SECURE SIGNED TOKEN)
 // ==========================================
 
+export function getFrontendBaseUrl(explicitFrontendUrl?: string): string {
+  if (explicitFrontendUrl && !explicitFrontendUrl.includes(':3000') && !explicitFrontendUrl.includes('onrender.com/api')) {
+    return explicitFrontendUrl.trim().replace(/\/+$/, '');
+  }
+  const configured = (
+    process.env.FRONTEND_URL ||
+    process.env.VITE_APP_URL ||
+    (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173')
+  ).trim().replace(/\/+$/, '');
+
+  return configured || 'http://localhost:5173';
+}
+
 export async function generateTableQr(
   cafeId: string,
   cafeSlug: string,
   tableNumber: number,
   tableId: string,
-  appUrl?: string
+  frontendUrl?: string
 ): Promise<{ qr_code_url: string; qr_token: string; qr_target_url: string }> {
-  const base = (appUrl || process.env.FRONTEND_URL || process.env.VITE_APP_URL || process.env.APP_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const base = getFrontendBaseUrl(frontendUrl);
   const qr_token = createTableQrToken({ cafeId, cafeSlug, tableNumber, tableId });
   const qr_target_url = `${base}/?mode=customer&qr=${qr_token}`;
 
@@ -425,7 +438,7 @@ export async function generateTableQr(
 export async function generateTableQrDataUrl(
   cafeSlug: string,
   tableNumber: number,
-  appUrl?: string,
+  frontendUrl?: string,
   tableId?: string,
   cafeId?: string
 ): Promise<string> {
@@ -434,16 +447,16 @@ export async function generateTableQrDataUrl(
     cafeSlug,
     tableNumber,
     tableId || `tbl-${cafeSlug}-${tableNumber}`,
-    appUrl
+    frontendUrl
   );
   return result.qr_code_url;
 }
 
 // Generate QR codes for all initial tables
-export async function ensureTableQRs(appUrl: string) {
+export async function ensureTableQRs(frontendUrl?: string) {
   for (const t of memoryCache.tables) {
     try {
-      const { qr_code_url, qr_token } = await generateTableQr(DEFAULT_CAFE_ID, DEFAULT_CAFE_SLUG, t.table_number, t.id, appUrl);
+      const { qr_code_url, qr_token } = await generateTableQr(DEFAULT_CAFE_ID, DEFAULT_CAFE_SLUG, t.table_number, t.id, frontendUrl);
       t.qr_code_url = qr_code_url;
       t.qr_token = qr_token;
     } catch (err) {

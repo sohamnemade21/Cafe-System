@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Cafe, StaffUser } from './types';
 import { api } from './services/api';
 import { CustomerMenu } from './pages/CustomerMenu';
-import { KitchenDisplay } from './components/kitchen/KitchenDisplay';
-import { AdminDashboard } from './components/admin/AdminDashboard';
-import { ReceptionDashboard } from './components/admin/ReceptionDashboard';
-import { StaffLoginModal } from './components/common/StaffLoginModal';
 import { CustomerAuthProvider } from './context/CustomerAuthContext';
-import { Smartphone, ChefHat, LayoutDashboard, Store, Receipt, ShieldCheck, LogIn, LogOut } from 'lucide-react';
+import { Smartphone, ChefHat, LayoutDashboard, Store, Receipt, ShieldCheck, LogIn, LogOut, Loader2 } from 'lucide-react';
 import { CoffeeBeanIcon } from './components/common/CoffeeBeanIcon';
+
+const KitchenDisplay = lazy(() => import('./components/kitchen/KitchenDisplay').then(m => ({ default: m.KitchenDisplay })));
+const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const ReceptionDashboard = lazy(() => import('./components/admin/ReceptionDashboard').then(m => ({ default: m.ReceptionDashboard })));
+const StaffLoginModal = lazy(() => import('./components/common/StaffLoginModal').then(m => ({ default: m.StaffLoginModal })));
 
 export default function App() {
   const [cafes, setCafes] = useState<Cafe[]>([]);
@@ -299,14 +300,23 @@ export default function App() {
         {/* RECEPTION PORTAL */}
         {currentMode === 'reception' && (
           currentStaff && (currentStaff.role === 'RECEPTION' || currentStaff.role === 'CAFE_OWNER' || currentStaff.role === 'MANAGER' || currentStaff.role === 'SUPER_ADMIN') ? (
-            <ReceptionDashboard
-              cafe={selectedCafe}
-              currentStaff={currentStaff}
-              onLogout={handleStaffLogout}
-              onOpenCustomerView={table => handleModeChange('customer', table || 1)}
-              onOpenKDS={() => handleModeChange('kds')}
-              onOpenAdmin={() => handleModeChange('admin')}
-            />
+            <Suspense fallback={
+              <div className="min-h-[70vh] flex items-center justify-center p-4">
+                <div className="flex items-center gap-2 text-stone-600 text-xs font-bold">
+                  <Loader2 className="w-5 h-5 animate-spin text-[#C87D32]" />
+                  <span>Loading Reception Desk...</span>
+                </div>
+              </div>
+            }>
+              <ReceptionDashboard
+                cafe={selectedCafe}
+                currentStaff={currentStaff}
+                onLogout={handleStaffLogout}
+                onOpenCustomerView={table => handleModeChange('customer', table || 1)}
+                onOpenKDS={() => handleModeChange('kds')}
+                onOpenAdmin={() => handleModeChange('admin')}
+              />
+            </Suspense>
           ) : (
             <div className="min-h-[70vh] flex items-center justify-center p-4">
               <div className="max-w-md w-full text-center space-y-4 bg-white p-8 rounded-3xl border border-[#EFE2D3] shadow-md">
@@ -346,12 +356,21 @@ export default function App() {
         {/* KITCHEN KDS PORTAL */}
         {currentMode === 'kds' && (
           currentStaff && (currentStaff.role === 'KITCHEN_STAFF' || currentStaff.role === 'CAFE_OWNER' || currentStaff.role === 'MANAGER' || currentStaff.role === 'SUPER_ADMIN') ? (
-            <KitchenDisplay
-              cafe={selectedCafe}
-              onExit={() => handleModeChange('customer')}
-              currentStaff={currentStaff}
-              onLogout={handleStaffLogout}
-            />
+            <Suspense fallback={
+              <div className="min-h-[70vh] flex items-center justify-center p-4">
+                <div className="flex items-center gap-2 text-stone-600 text-xs font-bold">
+                  <Loader2 className="w-5 h-5 animate-spin text-[#C87D32]" />
+                  <span>Loading Kitchen Display...</span>
+                </div>
+              </div>
+            }>
+              <KitchenDisplay
+                cafe={selectedCafe}
+                onExit={() => handleModeChange('customer')}
+                currentStaff={currentStaff}
+                onLogout={handleStaffLogout}
+              />
+            </Suspense>
           ) : (
             <div className="min-h-[70vh] flex items-center justify-center p-4">
               <div className="max-w-md w-full text-center space-y-4 bg-white p-8 rounded-3xl border border-[#EFE2D3] shadow-md">
@@ -391,20 +410,29 @@ export default function App() {
         {/* OWNER PORTAL */}
         {currentMode === 'admin' && (
           currentStaff && (currentStaff.role === 'CAFE_OWNER' || currentStaff.role === 'MANAGER' || currentStaff.role === 'SUPER_ADMIN') ? (
-            <AdminDashboard
-              currentCafe={selectedCafe}
-              allCafes={cafes}
-              currentStaff={currentStaff}
-              onLogout={handleStaffLogout}
-              onSelectCafe={cafe => {
-                setSelectedCafe(cafe);
-                const url = new URL(window.location.href);
-                url.searchParams.set('cafe', cafe.slug);
-                window.history.pushState({}, '', url.toString());
-              }}
-              onOpenCustomerView={table => handleModeChange('customer', table || 1)}
-              onOpenKDS={() => handleModeChange('kds')}
-            />
+            <Suspense fallback={
+              <div className="min-h-[70vh] flex items-center justify-center p-4">
+                <div className="flex items-center gap-2 text-stone-600 text-xs font-bold">
+                  <Loader2 className="w-5 h-5 animate-spin text-[#C87D32]" />
+                  <span>Loading Owner Dashboard...</span>
+                </div>
+              </div>
+            }>
+              <AdminDashboard
+                currentCafe={selectedCafe}
+                allCafes={cafes}
+                currentStaff={currentStaff}
+                onLogout={handleStaffLogout}
+                onSelectCafe={cafe => {
+                  setSelectedCafe(cafe);
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('cafe', cafe.slug);
+                  window.history.pushState({}, '', url.toString());
+                }}
+                onOpenCustomerView={table => handleModeChange('customer', table || 1)}
+                onOpenKDS={() => handleModeChange('kds')}
+              />
+            </Suspense>
           ) : (
             <div className="min-h-[70vh] flex items-center justify-center p-4">
               <div className="max-w-md w-full text-center space-y-4 bg-white p-8 rounded-3xl border border-[#EFE2D3] shadow-md">
@@ -443,13 +471,17 @@ export default function App() {
       </div>
 
       {/* Staff Login Modal */}
-      <StaffLoginModal
-        isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
-        onSuccess={handleLoginSuccess}
-        targetRole={pendingTargetMode === 'reception' ? 'RECEPTION' : pendingTargetMode === 'kds' ? 'KITCHEN_STAFF' : 'CAFE_OWNER'}
-        cafeSlug={selectedCafe.slug}
-      />
+      {isLoginModalOpen && (
+        <Suspense fallback={null}>
+          <StaffLoginModal
+            isOpen={isLoginModalOpen}
+            onClose={() => setIsLoginModalOpen(false)}
+            onSuccess={handleLoginSuccess}
+            targetRole={pendingTargetMode === 'reception' ? 'RECEPTION' : pendingTargetMode === 'kds' ? 'KITCHEN_STAFF' : 'CAFE_OWNER'}
+            cafeSlug={selectedCafe.slug}
+          />
+        </Suspense>
+      )}
     </div>
   </CustomerAuthProvider>
   );

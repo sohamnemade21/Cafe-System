@@ -1699,7 +1699,8 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
 async function startServer() {
   await initializeDatabase();
-  await ensureTableQRs(APP_URL);
+  const frontendUrl = (process.env.FRONTEND_URL || process.env.VITE_APP_URL || (isProd ? '' : 'http://localhost:5173')).trim().replace(/\/+$/, '');
+  await ensureTableQRs(frontendUrl);
 
   httpServer.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`🚀 QRDine Server listening on 0.0.0.0:${PORT} [${isProd ? 'Production' : 'Development'}]`);

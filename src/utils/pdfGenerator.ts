@@ -1,7 +1,7 @@
-import { jsPDF } from 'jspdf';
 import { Order, Cafe } from '../types';
 
-export function generateInvoicePDF(order: Order, cafe: Cafe): jsPDF {
+export async function generateInvoicePDF(order: Order, cafe: Cafe): Promise<any> {
+  const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',

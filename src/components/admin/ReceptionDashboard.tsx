@@ -157,14 +157,14 @@ export const ReceptionDashboard: React.FC<ReceptionDashboardProps> = ({
     }
   };
 
-  const handlePrintBill = (summary: TableSessionSummary) => {
+  const handlePrintBill = async (summary: TableSessionSummary) => {
     if (summary.orders.length === 0) {
       alert('No orders found to generate invoice for this table');
       return;
     }
     // Print invoice of the most recent or primary order of this session
     const primaryOrder = summary.orders[0];
-    const doc = generateInvoicePDF(primaryOrder, cafe);
+    const doc = await generateInvoicePDF(primaryOrder, cafe);
     doc.save(`Bill_Table_${summary.table.table_number}_Order_${primaryOrder.id.slice(-6)}.pdf`);
   };
 
