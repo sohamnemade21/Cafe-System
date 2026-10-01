@@ -47,6 +47,7 @@ export interface CafeTable {
   table_name: string;
   capacity: number;
   qr_code_url?: string;
+  qr_token?: string;
   status: TableStatus;
   current_order_id?: string;
 }

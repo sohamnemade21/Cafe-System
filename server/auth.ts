@@ -106,6 +106,65 @@ export function verifyStaffToken(token: string): StaffTokenPayload | null {
   }
 }
 
+export interface TableQrPayload {
+  cafeId: string;
+  cafeSlug: string;
+  tableNumber: number;
+  tableId: string;
+  iat?: number;
+}
+
+export function createTableQrToken(data: {
+  cafeId: string;
+  cafeSlug: string;
+  tableNumber: number;
+  tableId: string;
+}): string {
+  const payload: TableQrPayload = {
+    cafeId: data.cafeId,
+    cafeSlug: data.cafeSlug,
+    tableNumber: data.tableNumber,
+    tableId: data.tableId,
+    iat: Math.floor(Date.now() / 1000)
+  };
+
+  const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', EFFECTIVE_SECRET)
+    .update(`table_qr:${payloadStr}`)
+    .digest('base64url');
+
+  return `${payloadStr}.${signature}`;
+}
+
+export function verifyTableQrToken(token: string): TableQrPayload | null {
+  try {
+    if (!token || typeof token !== 'string') return null;
+    const parts = token.trim().split('.');
+    if (parts.length !== 2) return null;
+
+    const [payloadStr, signature] = parts;
+    const expectedSignature = crypto
+      .createHmac('sha256', EFFECTIVE_SECRET)
+      .update(`table_qr:${payloadStr}`)
+      .digest('base64url');
+
+    const sigBuf = Buffer.from(signature);
+    const expBuf = Buffer.from(expectedSignature);
+    if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+      return null;
+    }
+
+    const payload: TableQrPayload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString('utf8'));
+    if (!payload.cafeId || !payload.tableNumber) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 export async function verifyCustomerAuth(reqOrToken: Request | string): Promise<{ email: string; authUserId: string; name?: string } | null> {
   let token: string | null = null;
   if (typeof reqOrToken === 'string') {

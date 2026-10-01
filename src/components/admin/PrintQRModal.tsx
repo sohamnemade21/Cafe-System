@@ -137,17 +137,11 @@ export const PrintQRModal: React.FC<PrintQRModalProps> = ({
 
                   {/* High-Resolution QR Code Container */}
                   <div className="p-3.5 bg-white border-2 border-stone-200 rounded-2xl inline-block shadow-sm">
-                    {tbl.qr_code_url ? (
-                      <img
-                        src={tbl.qr_code_url}
-                        alt={`Scan QR Code for Table ${tbl.table_number}`}
-                        className="w-48 h-48 mx-auto"
-                      />
-                    ) : (
-                      <div className="w-48 h-48 flex items-center justify-center text-stone-400">
-                        <QrCode className="w-12 h-12" />
-                      </div>
-                    )}
+                    <img
+                      src={tbl.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(`${window.location.origin}/?mode=customer&cafe=${cafe.slug}&table=${tbl.table_number}`)}`}
+                      alt={`Scan QR Code for Table ${tbl.table_number}`}
+                      className="w-48 h-48 mx-auto object-contain"
+                    />
                   </div>
 
                   {/* 3-Step Scan Instructions */}
@@ -188,15 +182,11 @@ export const PrintQRModal: React.FC<PrintQRModalProps> = ({
                   </div>
 
                   <div className="p-2 bg-stone-50 border border-stone-200 rounded-xl inline-block">
-                    {tbl.qr_code_url ? (
-                      <img
-                        src={tbl.qr_code_url}
-                        alt={`QR code for Table ${tbl.table_number}`}
-                        className="w-32 h-32 mx-auto"
-                      />
-                    ) : (
-                      <QrCode className="w-12 h-12 text-stone-400 mx-auto" />
-                    )}
+                    <img
+                      src={tbl.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`${window.location.origin}/?mode=customer&cafe=${cafe.slug}&table=${tbl.table_number}`)}`}
+                      alt={`QR code for Table ${tbl.table_number}`}
+                      className="w-32 h-32 mx-auto object-contain"
+                    />
                   </div>
 
                   <div className="space-y-0.5">

@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import QRCode from 'qrcode';
-import { hashPassword } from './auth.js';
+import { hashPassword, createTableQrToken, verifyTableQrToken } from './auth.js';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
 const SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim();
@@ -70,6 +70,7 @@ export interface TableRecord {
   table_name: string;
   capacity: number;
   qr_code_url: string;
+  qr_token?: string;
   status: 'FREE' | 'OCCUPIED' | 'RESERVED' | 'BILL_REQUESTED';
   current_order_id?: string;
 }
@@ -394,29 +395,57 @@ export const memoryCache = {
 };
 
 // ==========================================
-// QR CODE GENERATOR UTILITY
+// QR CODE GENERATOR UTILITY (SECURE SIGNED TOKEN)
 // ==========================================
 
-export async function generateTableQrDataUrl(cafeSlug: string, tableNumber: number, appUrl?: string): Promise<string> {
-  const base = (appUrl || process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
-  const qrTargetUrl = `${base}/?mode=customer&cafe=${cafeSlug}&table=${tableNumber}`;
+export async function generateTableQr(
+  cafeId: string,
+  cafeSlug: string,
+  tableNumber: number,
+  tableId: string,
+  appUrl?: string
+): Promise<{ qr_code_url: string; qr_token: string; qr_target_url: string }> {
+  const base = (appUrl || process.env.FRONTEND_URL || process.env.VITE_APP_URL || process.env.APP_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const qr_token = createTableQrToken({ cafeId, cafeSlug, tableNumber, tableId });
+  const qr_target_url = `${base}/?mode=customer&qr=${qr_token}`;
 
-  return await QRCode.toDataURL(qrTargetUrl, {
+  const qr_code_url = await QRCode.toDataURL(qr_target_url, {
     errorCorrectionLevel: 'H',
     margin: 2,
-    width: 320,
+    width: 400,
     color: {
       dark: '#1c1917',
       light: '#ffffff'
     }
   });
+
+  return { qr_code_url, qr_token, qr_target_url };
+}
+
+export async function generateTableQrDataUrl(
+  cafeSlug: string,
+  tableNumber: number,
+  appUrl?: string,
+  tableId?: string,
+  cafeId?: string
+): Promise<string> {
+  const result = await generateTableQr(
+    cafeId || DEFAULT_CAFE_ID,
+    cafeSlug,
+    tableNumber,
+    tableId || `tbl-${cafeSlug}-${tableNumber}`,
+    appUrl
+  );
+  return result.qr_code_url;
 }
 
 // Generate QR codes for all initial tables
 export async function ensureTableQRs(appUrl: string) {
   for (const t of memoryCache.tables) {
     try {
-      t.qr_code_url = await generateTableQrDataUrl(DEFAULT_CAFE_SLUG, t.table_number, appUrl);
+      const { qr_code_url, qr_token } = await generateTableQr(DEFAULT_CAFE_ID, DEFAULT_CAFE_SLUG, t.table_number, t.id, appUrl);
+      t.qr_code_url = qr_code_url;
+      t.qr_token = qr_token;
     } catch (err) {
       console.error(`Failed to generate QR for table ${t.table_number}:`, err);
     }
@@ -770,10 +799,12 @@ export const db = {
   },
 
   // --- TABLES & QR CODES ---
-  async getTables(cafeId: string) {
+  async getTables(cafeId: string): Promise<TableRecord[]> {
     const cafe = await this.getCafeBySlugOrId(cafeId);
     const targetId = cafe ? cafe.id : cafeId;
+    const targetSlug = cafe ? cafe.slug : DEFAULT_CAFE_SLUG;
 
+    let tables: TableRecord[] = [];
     if (supabaseServer) {
       const { data, error } = await supabaseServer
         .from('tables')
@@ -781,10 +812,36 @@ export const db = {
         .eq('cafe_id', targetId)
         .order('table_number', { ascending: true });
 
-      if (!error && data) return data;
+      if (!error && data) tables = data;
     }
 
-    return memoryCache.tables.filter(t => t.cafe_id === targetId || t.cafe_id === cafe?.slug);
+    if (tables.length === 0) {
+      tables = memoryCache.tables.filter(t => t.cafe_id === targetId || t.cafe_id === cafe?.slug);
+    }
+
+    // Ensure every table has a valid real QR data URL and secure token
+    const enrichedTables: TableRecord[] = await Promise.all(
+      tables.map(async (t) => {
+        if (!t.qr_code_url || !t.qr_code_url.startsWith('data:image/') || !t.qr_token) {
+          try {
+            const { qr_code_url, qr_token } = await generateTableQr(targetId, targetSlug, t.table_number, t.id);
+            t.qr_code_url = qr_code_url;
+            t.qr_token = qr_token;
+            // Best-effort update Supabase in background
+            if (supabaseServer) {
+              try {
+                supabaseServer.from('tables').update({ qr_code_url }).eq('id', t.id).then(() => {}, () => {});
+              } catch {}
+            }
+          } catch (err) {
+            console.error(`Error generating QR for table ${t.table_number}:`, err);
+          }
+        }
+        return t;
+      })
+    );
+
+    return enrichedTables;
   },
 
   async createTable(cafeId: string, data: { table_number: number; table_name: string; capacity: number }): Promise<TableRecord> {
@@ -797,8 +854,8 @@ export const db = {
       throw new Error(`Table #${num} already exists in this café`);
     }
 
-    const qrCodeUrl = await generateTableQrDataUrl(cafe.slug, num);
     const newId = crypto.randomUUID();
+    const { qr_code_url, qr_token } = await generateTableQr(cafe.id, cafe.slug, num, newId);
 
     const newTable: TableRecord = {
       id: newId,
@@ -806,7 +863,8 @@ export const db = {
       table_number: num,
       table_name: data.table_name?.trim() || `Table ${num}`,
       capacity: Number(data.capacity) || 4,
-      qr_code_url: qrCodeUrl,
+      qr_code_url,
+      qr_token,
       status: 'FREE'
     };
 
@@ -827,8 +885,9 @@ export const db = {
           .single();
 
         if (!error && created) {
-          memoryCache.tables.push(created);
-          return created;
+          const res = { ...created, qr_token };
+          memoryCache.tables.push(res);
+          return res;
         }
       } catch (err) {
         console.warn('Supabase table insert fallback to cache:', err);
@@ -860,8 +919,12 @@ export const db = {
   async regenerateTableQr(tableId: string): Promise<TableRecord> {
     const table = await this.updateTable(tableId, {});
     const cafe = await this.getCafeBySlugOrId(table.cafe_id);
-    const qrUrl = await generateTableQrDataUrl(cafe?.slug || DEFAULT_CAFE_SLUG, table.table_number);
-    return await this.updateTable(tableId, { qr_code_url: qrUrl });
+    const cafeId = cafe?.id || table.cafe_id;
+    const cafeSlug = cafe?.slug || DEFAULT_CAFE_SLUG;
+
+    const { qr_code_url, qr_token } = await generateTableQr(cafeId, cafeSlug, table.table_number, table.id);
+    const updated = await this.updateTable(tableId, { qr_code_url });
+    return { ...updated, qr_token, qr_code_url };
   },
 
   // --- TABLE SESSIONS ---

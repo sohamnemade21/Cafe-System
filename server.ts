@@ -22,6 +22,8 @@ import {
   verifyStaffToken,
   verifyPassword,
   verifyCustomerAuth,
+  createTableQrToken,
+  verifyTableQrToken,
   StaffTokenPayload
 } from './server/auth.js';
 import {
@@ -483,6 +485,83 @@ app.post('/api/tables/:tableId/release', requireStaffAuth(['RECEPTION', 'CAFE_OW
 });
 
 // 5. Table Sessions & Customer QR Flow
+
+// Secure QR Token Resolution Endpoint
+app.all(['/api/qr/resolve', '/api/tables/qr/resolve'], async (req: Request, res: Response) => {
+  try {
+    const qrToken = req.body?.qr_token || req.body?.qr || req.query?.qr_token || req.query?.qr;
+    if (!qrToken || typeof qrToken !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_QR_REQUEST', message: 'A secure QR token is required' }
+      });
+    }
+
+    const payload = verifyTableQrToken(qrToken);
+    if (!payload) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'INVALID_QR_TOKEN', message: 'The scanned QR code is invalid, tampered, or expired. Please rescan the physical table standee.' }
+      });
+    }
+
+    const cafe = await db.getCafeBySlugOrId(payload.cafeId || payload.cafeSlug);
+    if (!cafe) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'CAFE_NOT_FOUND', message: 'The café associated with this QR code could not be found' }
+      });
+    }
+
+    const tables = await db.getTables(cafe.id);
+    const table = tables.find(t => t.table_number === payload.tableNumber || t.id === payload.tableId);
+    if (!table) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'TABLE_NOT_FOUND', message: `Table #${payload.tableNumber} does not exist in ${cafe.name}` }
+      });
+    }
+
+    // Get or initialize active session for this verified table
+    let session = await db.getActiveSessionForTable(cafe.id, table.table_number);
+    if (!session) {
+      const newToken = `tok_${cafe.slug}_t${table.table_number}_${crypto.randomBytes(8).toString('hex')}`;
+      session = await db.createTableSession({
+        cafe_id: cafe.id,
+        table_id: table.id,
+        table_number: table.table_number,
+        session_token: newToken,
+        status: 'ACTIVE',
+        orders: [],
+        total_amount: 0,
+        paid_amount: 0,
+        outstanding_amount: 0
+      });
+      await db.updateTable(table.id, { status: 'OCCUPIED' });
+    }
+
+    const recalculated = await recalculateTableSession(session);
+
+    res.json({
+      success: true,
+      data: {
+        cafe,
+        table,
+        session: recalculated,
+        session_id: recalculated.id,
+        session_token: recalculated.session_token,
+        table_number: table.table_number,
+        table_name: table.table_name
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'QR_RESOLVE_FAILED', message: err.message }
+    });
+  }
+});
+
 app.post('/api/tables/session/init', async (req: Request, res: Response) => {
   try {
     const cafeIdentifier = req.body.cafe_id || req.body.cafeSlug || req.body.cafe || 'roasted-bean';

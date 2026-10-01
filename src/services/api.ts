@@ -269,6 +269,25 @@ export const api = {
     return json.data;
   },
 
+  async resolveQr(qrToken: string): Promise<{
+    cafe: Cafe;
+    table: CafeTable;
+    session: TableSession;
+    session_id: string;
+    session_token: string;
+    table_number: number;
+    table_name: string;
+  }> {
+    const json = await safeFetchJson<{ data: any }>(`${BASE_URL}/qr/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ qr_token: qrToken })
+    });
+    if (json.data?.session_token) {
+      this.setCustomerSessionToken(json.data.session_token);
+    }
+    return json.data;
+  },
+
   async initTableSession(cafeId: string, tableNumber: number): Promise<{
     session_id: string;
     session_token: string;

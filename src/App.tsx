@@ -23,14 +23,18 @@ export default function App() {
   const [pendingTargetMode, setPendingTargetMode] = useState<'reception' | 'kds' | 'admin' | null>(null);
 
   // Check existing session & parse URL query params
+  const [qrError, setQrError] = useState<string | null>(null);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const modeParam = params.get('mode');
     const tableParam = params.get('table');
+    const qrParam = params.get('qr');
 
     if (modeParam === 'admin' || modeParam === 'kds' || modeParam === 'reception' || modeParam === 'customer') {
       setCurrentMode(modeParam as any);
     }
+
     if (tableParam) {
       const parsed = parseInt(tableParam, 10);
       if (!isNaN(parsed) && parsed > 0) {
@@ -55,18 +59,42 @@ export default function App() {
         });
     }
 
-    // Load available cafes
-    api.getCafes()
-      .then(res => {
-        setCafes(res);
-        if (res.length > 0) {
-          const cafeSlugParam = params.get('cafe');
-          const matched = res.find(c => c.slug === cafeSlugParam || c.id === cafeSlugParam);
-          setSelectedCafe(matched || res[0]);
-        }
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    // Load available cafes or resolve QR token
+    if (qrParam) {
+      api.resolveQr(qrParam)
+        .then(res => {
+          setSelectedCafe(res.cafe);
+          setSelectedTableNumber(res.table_number || res.table?.table_number);
+          setCurrentMode('customer');
+          setQrError(null);
+          // Also fetch full cafes list in background
+          api.getCafes().then(setCafes).catch(() => {});
+        })
+        .catch(err => {
+          console.error('QR code resolution failed:', err);
+          setQrError(err.message || 'Scanned QR code is invalid or expired.');
+          // Fallback to loading standard cafes list
+          api.getCafes()
+            .then(res => {
+              setCafes(res);
+              if (res.length > 0) setSelectedCafe(res[0]);
+            })
+            .catch(console.error);
+        })
+        .finally(() => setLoading(false));
+    } else {
+      api.getCafes()
+        .then(res => {
+          setCafes(res);
+          if (res.length > 0) {
+            const cafeSlugParam = params.get('cafe');
+            const matched = res.find(c => c.slug === cafeSlugParam || c.id === cafeSlugParam);
+            setSelectedCafe(matched || res[0]);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    }
   }, []);
 
   const handleModeChange = (mode: 'customer' | 'reception' | 'kds' | 'admin', table?: number | null) => {

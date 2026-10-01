@@ -154,29 +154,23 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
 
                 {/* QR Preview Box */}
                 <div className="my-4 p-3.5 bg-[#FAF8F5] border border-stone-200 rounded-xl flex items-center gap-3.5">
-                  {table.qr_code_url ? (
-                    <div className="relative group/qr shrink-0">
-                      <img
-                        src={table.qr_code_url}
-                        alt={`Table ${table.table_number} QR`}
-                        className="w-20 h-20 rounded-xl bg-white p-1.5 border border-stone-300 shadow-xs cursor-pointer hover:border-stone-900 transition-colors"
-                        onClick={() => setSelectedTableForPrint(table)}
-                        title="Click to view full standee & print preview"
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-20 h-20 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 shrink-0">
-                      <QrCode className="w-8 h-8" />
-                    </div>
-                  )}
+                  <div className="relative group/qr shrink-0">
+                    <img
+                      src={table.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`${window.location.origin}/?mode=customer&cafe=${cafe.slug}&table=${table.table_number}`)}`}
+                      alt={`Table ${table.table_number} QR`}
+                      className="w-20 h-20 rounded-xl bg-white p-1.5 border border-stone-300 shadow-xs cursor-pointer hover:border-stone-900 transition-colors object-contain"
+                      onClick={() => setSelectedTableForPrint(table)}
+                      title="Click to view full standee & print preview"
+                    />
+                  </div>
 
                   <div className="text-xs space-y-1.5 min-w-0 flex-1">
                     <div className="space-y-0.5">
-                      <p className="font-bold text-stone-900 truncate text-[11px]">
-                        /?mode=customer&table={table.table_number}
+                      <p className="font-bold text-stone-900 truncate text-[11px] font-mono">
+                        {table.qr_token ? `/?mode=customer&qr=${table.qr_token.slice(0, 14)}...` : `/?mode=customer&cafe=${cafe.slug}&table=${table.table_number}`}
                       </p>
                       <p className="text-[10px] text-stone-500">
-                        Scan sends diner directly to Table #{table.table_number} ordering menu
+                        Scan sends diner securely to Table #{table.table_number} in {cafe.name}
                       </p>
                     </div>
 
@@ -190,16 +184,14 @@ export const TablesQRManager: React.FC<TablesQRManagerProps> = ({
                         <span>Simulate Scan</span>
                       </button>
 
-                      {table.qr_code_url && (
-                        <button
-                          onClick={handleDownloadPNG}
-                          className="text-stone-600 hover:text-stone-900 font-semibold text-[11px] flex items-center gap-1 cursor-pointer"
-                          title="Download standalone PNG for table sticker"
-                        >
-                          <Download className="w-3 h-3" />
-                          <span>PNG</span>
-                        </button>
-                      )}
+                      <button
+                        onClick={handleDownloadPNG}
+                        className="text-stone-600 hover:text-stone-900 font-semibold text-[11px] flex items-center gap-1 cursor-pointer"
+                        title="Download standalone PNG for table sticker"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>PNG</span>
+                      </button>
                     </div>
                   </div>
                 </div>
