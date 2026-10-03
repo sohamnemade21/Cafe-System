@@ -1336,12 +1336,13 @@ export const db = {
         .from('notifications')
         .select('*')
         .eq('cafe_id', targetId)
+        .eq('is_read', false)
         .order('created_at', { ascending: false })
         .limit(50);
       if (!error && data) return data;
     }
 
-    return memoryCache.notifications.filter(n => n.cafe_id === targetId || n.cafe_id === cafe?.slug);
+    return memoryCache.notifications.filter(n => (n.cafe_id === targetId || n.cafe_id === cafe?.slug) && !n.is_read);
   },
 
   async createNotification(notif: { cafe_id: string; table_id: string; table_number: number; type: string; message: string }) {
@@ -1358,6 +1359,33 @@ export const db = {
 
     memoryCache.notifications.unshift(newNotif);
     return newNotif;
+  },
+
+  async resolveNotification(notifId: string) {
+    // Mark is_read = true in Supabase
+    if (supabaseServer) {
+      const { data, error } = await supabaseServer
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', notifId)
+        .select()
+        .single();
+      if (!error && data) {
+        // Also update memory cache
+        const cached = memoryCache.notifications.find((n: any) => n.id === notifId);
+        if (cached) cached.is_read = true;
+        return data;
+      }
+    }
+
+    // Fallback: memory-only
+    const cached = memoryCache.notifications.find((n: any) => n.id === notifId);
+    if (cached) {
+      cached.is_read = true;
+      return cached;
+    }
+
+    return null;
   },
 
   // --- CUSTOMERS & CRM ---

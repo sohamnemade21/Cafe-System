@@ -1173,7 +1173,15 @@ app.post('/api/reception/settle-payment', requireStaffAuth(['RECEPTION', 'CAFE_O
 });
 
 app.post('/api/reception/notifications/:notifId/resolve', requireStaffAuth(['RECEPTION', 'CAFE_OWNER', 'MANAGER']), async (req: Request, res: Response) => {
-  res.json({ success: true, data: { resolved: true } });
+  try {
+    const resolved = await db.resolveNotification(req.params.notifId);
+    if (!resolved) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Notification not found' } });
+    }
+    res.json({ success: true, data: resolved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'RESOLVE_FAILED', message: err.message } });
+  }
 });
 
 app.get('/api/notifications/:cafeId', requireStaffAuth(['RECEPTION', 'CAFE_OWNER', 'MANAGER', 'KITCHEN_STAFF', 'WAITER', 'SUPER_ADMIN']), async (req: Request, res: Response) => {
