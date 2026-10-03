@@ -35,10 +35,19 @@ interface CustomerAuthContextType {
 
 const CustomerAuthContext = createContext<CustomerAuthContextType | undefined>(undefined);
 
-// Dynamically compute the exact callback origin for both local preview and production Cloud Run
+// Dynamically compute the callback URL preserving critical QR/table/mode query params
+// so that after Google OAuth or email-confirmation redirect the customer lands back
+// in their exact table-ordering session instead of the bare site root.
 function getAppRedirectUrl(): string {
   if (typeof window !== 'undefined') {
-    return window.location.origin + window.location.pathname;
+    const url = new URL(window.location.origin + window.location.pathname);
+    const current = new URLSearchParams(window.location.search);
+    // Preserve the params that identify the customer's ordering session
+    for (const key of ['mode', 'qr', 'table', 'cafe']) {
+      const val = current.get(key);
+      if (val) url.searchParams.set(key, val);
+    }
+    return url.toString();
   }
   return '';
 }

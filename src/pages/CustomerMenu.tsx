@@ -34,6 +34,7 @@ export const CustomerMenu: React.FC<CustomerMenuProps> = ({
 }) => {
   const {
     customer,
+    loading: authLoading,
     isAuthModalOpen,
     authModalMode,
     authNotice,
@@ -88,6 +89,14 @@ export const CustomerMenu: React.FC<CustomerMenuProps> = ({
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   const menuSectionRef = useRef<HTMLDivElement>(null);
+
+  // Bug #1 fix: Auto-open auth modal when unauthenticated customer lands via QR scan
+  useEffect(() => {
+    // Wait until auth initialization finishes, then check
+    if (!authLoading && !customer && tableNumber) {
+      openAuthModal('login');
+    }
+  }, [authLoading, customer, tableNumber]);
 
   // Load Café & Menu Data
   useEffect(() => {
