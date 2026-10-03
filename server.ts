@@ -814,7 +814,7 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       calculatedSubtotal += lineTotal;
 
       validatedOrderItems.push({
-        id: `oi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: crypto.randomUUID(),
         menu_item_id: dbItem.id,
         item_name: dbItem.name,
         unit_price: unitPrice,
@@ -843,13 +843,31 @@ app.post('/api/orders', async (req: Request, res: Response) => {
     const serviceCharge = Number(((discountedSubtotal * (cafe.service_charge_rate || 0.0)) / 100).toFixed(2));
     const finalTotal = Number((discountedSubtotal + tax + serviceCharge).toFixed(2));
 
-    const orderId = `ord-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    let dbCustomerId: string | null = null;
+    try {
+      if (customer?.email) {
+        const isAuthUuid = customer.authUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(customer.authUserId);
+        const synced = await db.syncCustomer({
+          auth_user_id: isAuthUuid ? customer.authUserId : undefined,
+          email: customer.email,
+          name: customer_name || customer.name || customer.email.split('@')[0],
+          phone: customer_phone || ''
+        });
+        if (synced && synced.id) {
+          dbCustomerId = synced.id;
+        }
+      }
+    } catch (e) {
+      console.warn('Customer CRM sync skipped:', e);
+    }
+
+    const orderId = crypto.randomUUID();
     const newOrder: OrderRecord = {
       id: orderId,
       cafe_id: cafe.id,
       table_session_id: session.id,
       customer_session_token: session.session_token,
-      customer_id: customer.authUserId,
+      customer_id: dbCustomerId || undefined,
       customer_name: customer_name || customer.name || 'Valued Patron',
       customer_email: customer.email || customer_email || '',
       customer_phone: customer_phone || '',
@@ -862,7 +880,7 @@ app.post('/api/orders', async (req: Request, res: Response) => {
       tax,
       service_charge: serviceCharge,
       total: finalTotal,
-      payment_status: 'UNPAID',
+      payment_status: 'PENDING',
       order_status: 'PENDING',
       notes,
       created_at: new Date().toISOString(),
@@ -883,6 +901,7 @@ app.post('/api/orders', async (req: Request, res: Response) => {
     });
 
     broadcastRealtime('order_created', { order: savedOrder, session });
+    broadcastRealtime('new_order', { order: savedOrder, session });
 
     res.status(201).json({
       success: true,
@@ -1135,6 +1154,8 @@ app.post('/api/reception/settle-payment', requireStaffAuth(['RECEPTION', 'CAFE_O
     });
 
     broadcastRealtime('reception_payment_settled', { table_number: table.table_number, totalSettled, method });
+    broadcastRealtime('payment_confirmed', { table_number: table.table_number, totalSettled, method });
+    broadcastRealtime('table_status_changed', { table_number: table.table_number });
 
     res.json({
       success: true,
@@ -1304,6 +1325,7 @@ app.post('/api/payments/verify', async (req: Request, res: Response) => {
     }
 
     broadcastRealtime('payment_success', { order: updated });
+    broadcastRealtime('payment_confirmed', { order: updated });
 
     res.json({
       success: true,
@@ -1615,30 +1637,128 @@ app.post(['/api/invoices/:orderId/email', '/api/orders/:orderId/send-invoice-ema
   }
 });
 
-app.get('/api/cafes/:cafeId/customers', requireStaffAuth(['CAFE_OWNER', 'MANAGER']), async (req: Request, res: Response) => {
-  res.json({ success: true, data: memoryCache.customers });
+app.get('/api/cafes/:cafeId/customers', requireStaffAuth(['CAFE_OWNER', 'MANAGER', 'SUPER_ADMIN']), async (req: Request, res: Response) => {
+  try {
+    const cafe = await db.getCafeBySlugOrId(req.params.cafeId);
+    if (!cafe) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Café not found' } });
+    const customers = await db.getCustomersForCafe(cafe.id);
+    res.json({ success: true, data: customers });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { code: 'FETCH_ERROR', message: err.message } });
+  }
 });
 
-app.get('/api/reports/:cafeId', requireStaffAuth(['CAFE_OWNER', 'MANAGER']), async (req: Request, res: Response) => {
+app.get('/api/reports/:cafeId', requireStaffAuth(['CAFE_OWNER', 'MANAGER', 'SUPER_ADMIN']), async (req: Request, res: Response) => {
   try {
-    const orders = await db.getOrders(req.params.cafeId);
-    const paid = orders.filter(o => o.payment_status === 'PAID');
-    const rev = paid.reduce((s, o) => s + o.total, 0);
+    const cafe = await db.getCafeBySlugOrId(req.params.cafeId);
+    if (!cafe) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Café not found' } });
 
-    const upiCount = paid.filter(o => o.payment_id?.startsWith('pay_') || o.payment_id?.includes('UPI')).length;
-    const cardCount = paid.filter(o => o.payment_id?.includes('CARD')).length;
-    const cashCount = Math.max(0, paid.length - upiCount - cardCount);
+    const [tables, orders, customers] = await Promise.all([
+      db.getTables(cafe.id),
+      db.getOrders(cafe.id),
+      db.getCustomersForCafe(cafe.id)
+    ]);
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const todayOrders = orders.filter(o => new Date(o.created_at) >= startOfToday);
+    const activeOrders = orders.filter(o => ['PENDING', 'CONFIRMED', 'ACCEPTED', 'PREPARING', 'READY'].includes(o.order_status));
+    const completedOrders = orders.filter(o => ['SERVED', 'COMPLETED'].includes(o.order_status));
+
+    const paidOrders = orders.filter(o => o.payment_status === 'PAID');
+    const todayPaidOrders = todayOrders.filter(o => o.payment_status === 'PAID');
+    const unpaidActiveOrders = orders.filter(o => o.payment_status !== 'PAID' && o.order_status !== 'CANCELLED');
+
+    const totalRevenue = Number(paidOrders.reduce((sum, o) => sum + o.total, 0).toFixed(2));
+    const todayRevenue = Number(todayPaidOrders.reduce((sum, o) => sum + o.total, 0).toFixed(2));
+    const pendingPaymentTotal = Number(unpaidActiveOrders.reduce((sum, o) => sum + o.total, 0).toFixed(2));
+
+    // Per-table inspection and bills calculated strictly from actual active session orders
+    const tableBills = await Promise.all(
+      tables.map(async (t) => {
+        const session = await db.getActiveSessionForTable(cafe.id, t.table_number);
+        const tblOrders = session
+          ? orders.filter(o => o.table_session_id === session.id && o.order_status !== 'CANCELLED')
+          : [];
+
+        let currentBill = 0;
+        let totalPaid = 0;
+        tblOrders.forEach(o => {
+          currentBill += o.total;
+          if (o.payment_status === 'PAID') totalPaid += o.total;
+        });
+
+        return {
+          table_id: t.id,
+          table_number: t.table_number,
+          table_name: t.table_name,
+          capacity: t.capacity,
+          status: t.status,
+          active_session_id: session ? session.id : null,
+          order_count: tblOrders.length,
+          current_bill: Number(currentBill.toFixed(2)),
+          total_paid: Number(totalPaid.toFixed(2)),
+          outstanding: Math.max(0, Number((currentBill - totalPaid).toFixed(2)))
+        };
+      })
+    );
+
+    const activeTableTotals = Number(tableBills.reduce((sum, tb) => sum + tb.outstanding, 0).toFixed(2));
+    const occupiedTablesCount = tables.filter(t => t.status === 'OCCUPIED' || t.status === 'BILL_REQUESTED').length;
+    const activeTablesCount = tableBills.filter(tb => tb.active_session_id !== null).length;
+
+    // Real best selling dishes
+    const itemMap = new Map<string, { name: string; count: number; revenue: number }>();
+    for (const ord of orders) {
+      if (ord.order_status === 'CANCELLED') continue;
+      for (const item of ord.items) {
+        const key = item.item_name;
+        if (!itemMap.has(key)) {
+          itemMap.set(key, { name: key, count: 0, revenue: 0 });
+        }
+        const record = itemMap.get(key)!;
+        record.count += item.quantity;
+        record.revenue = Number((record.revenue + item.subtotal).toFixed(2));
+      }
+    }
+    const bestSellingItems = Array.from(itemMap.values())
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    // Real payment method counts from actual paid orders
+    const upiCount = paidOrders.filter(o => o.payment_id?.startsWith('pay_') || o.payment_id?.toLowerCase().includes('upi')).length;
+    const cardCount = paidOrders.filter(o => o.payment_id?.toLowerCase().includes('card')).length;
+    const cashCount = paidOrders.filter(o => o.payment_id?.toLowerCase().includes('cash') || o.payment_id?.toLowerCase().includes('rec_cash')).length;
+    const otherCount = Math.max(0, paidOrders.length - upiCount - cardCount - cashCount);
 
     res.json({
       success: true,
       data: {
-        total_revenue: Number(rev.toFixed(2)),
+        total_tables: tables.length,
+        active_tables: activeTablesCount,
+        occupied_tables: occupiedTablesCount,
+        today_orders: todayOrders.length,
+        active_orders: activeOrders.length,
+        completed_orders: completedOrders.length,
+        today_revenue: todayRevenue,
+        total_revenue: totalRevenue,
         total_orders: orders.length,
-        aov: paid.length > 0 ? Number((rev / paid.length).toFixed(2)) : 0,
+        aov: paidOrders.length > 0 ? Number((totalRevenue / paidOrders.length).toFixed(2)) : 0,
+        active_table_totals: activeTableTotals,
+        pending_payments_count: unpaidActiveOrders.length,
+        pending_payments_total: pendingPaymentTotal,
+        completed_payments_count: paidOrders.length,
+        completed_payments_total: totalRevenue,
+        customer_count: customers.length,
+        table_bills: tableBills,
+        best_selling_items: bestSellingItems,
         payment_breakdown: {
-          UPI: upiCount || Math.round(paid.length * 0.70),
-          Cards: cardCount || Math.round(paid.length * 0.20),
-          Cash: cashCount || Math.round(paid.length * 0.10)
+          UPI: upiCount,
+          Cards: cardCount,
+          Cash: cashCount,
+          Other: otherCount,
+          total_paid: paidOrders.length
         }
       }
     });

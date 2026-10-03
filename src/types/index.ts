@@ -11,6 +11,7 @@ export type TableStatus = 'FREE' | 'OCCUPIED' | 'RESERVED' | 'BILL_REQUESTED';
 
 export type OrderStatus = 
   | 'PENDING' 
+  | 'CONFIRMED'
   | 'PAID' 
   | 'ACCEPTED' 
   | 'PREPARING' 
@@ -19,7 +20,7 @@ export type OrderStatus =
   | 'COMPLETED' 
   | 'CANCELLED';
 
-export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
+export type PaymentStatus = 'UNPAID' | 'PAYMENT_PENDING' | 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
 
 export type VariantType = 'SIZE' | 'ROAST' | 'ADDON' | 'CRUST' | 'OPTION';
 

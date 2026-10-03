@@ -405,9 +405,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   <span>{checkoutError}</span>
                 </div>
               )}
-              <div className="flex items-center gap-2 text-[11px] text-[#705648] justify-center">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Verified Razorpay 256-Bit Encrypted Dine-in Checkout</span>
+              <div className="flex items-center gap-2 text-[11px] text-[#705648] justify-center text-center">
+                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>Sent directly to kitchen. Payment is optional now (pay online or at reception).</span>
               </div>
               {!tableNumber ? (
                 <button
@@ -437,11 +437,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   {isSubmitting ? (
                     <div className="flex items-center gap-2 mx-auto">
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Creating Order &amp; Verifying Items...</span>
+                      <span>Placing Order &amp; Sending to Kitchen...</span>
                     </div>
                   ) : (
                     <>
-                      <span className="tracking-wide">PROCEED TO SECURE PAYMENT</span>
+                      <span className="tracking-wide">CONFIRM ORDER (SEND TO KITCHEN)</span>
                       <div className="flex items-center gap-1.5 text-[#E6AA68]">
                         <span>{cafe.currency}{grandTotal.toFixed(2)}</span>
                         <ArrowRight className="w-4 h-4" />

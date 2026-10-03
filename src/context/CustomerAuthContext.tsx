@@ -17,15 +17,16 @@ interface CustomerAuthContextType {
   loading: boolean;
   isAuthenticated: boolean;
   isAuthModalOpen: boolean;
-  authModalMode: 'login' | 'signup' | 'forgot_password';
+  authModalMode: 'login' | 'signup' | 'forgot_password' | 'reset_password';
   authNotice: AuthNotice | null;
   dismissNotice: () => void;
-  openAuthModal: (mode?: 'login' | 'signup' | 'forgot_password') => void;
+  openAuthModal: (mode?: 'login' | 'signup' | 'forgot_password' | 'reset_password') => void;
   closeAuthModal: () => void;
   loginWithEmail: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   signupWithEmail: (fullName: string, email: string, password: string, phone?: string) => Promise<{ success: boolean; error?: string; message?: string }>;
   loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string; message?: string }>;
+  updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string; message?: string }>;
   resendConfirmationEmail: (email: string) => Promise<{ success: boolean; error?: string; message?: string }>;
   updateProfile: (updates: { name?: string; phone?: string; profile_image?: string }) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -47,10 +48,10 @@ export const CustomerAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
   const [supabaseUser, setSupabaseUser] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'signup' | 'forgot_password'>('login');
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'signup' | 'forgot_password' | 'reset_password'>('login');
   const [authNotice, setAuthNotice] = useState<AuthNotice | null>(null);
 
-  const openAuthModal = (mode: 'login' | 'signup' | 'forgot_password' = 'login') => {
+  const openAuthModal = (mode: 'login' | 'signup' | 'forgot_password' | 'reset_password' = 'login') => {
     setAuthModalMode(mode);
     setIsAuthModalOpen(true);
   };
@@ -135,6 +136,12 @@ export const CustomerAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
           const error = hashParams.get('error') || searchParams.get('error');
           const errorCode = hashParams.get('error_code') || searchParams.get('error_code');
           const errorDesc = hashParams.get('error_description') || searchParams.get('error_description');
+          const type = hashParams.get('type') || searchParams.get('type');
+
+          if (type === 'recovery') {
+            setAuthModalMode('reset_password');
+            setIsAuthModalOpen(true);
+          }
 
           if (error || errorCode) {
             console.warn('Supabase confirmation callback issue:', { error, errorCode, errorDesc });
@@ -142,8 +149,8 @@ export const CustomerAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
               setAuthNotice({
                 type: 'error',
                 code: 'otp_expired',
-                title: 'Email Confirmation Link Expired',
-                message: 'Your email verification link is invalid or has expired. Request a fresh confirmation email below or sign in if already confirmed.',
+                title: 'Email Link Expired',
+                message: 'Your verification or password reset link is invalid or has expired. Request a fresh link below.',
                 action: 'resend_confirmation',
               });
             } else {
@@ -199,7 +206,10 @@ export const CustomerAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (!mounted) return;
 
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        if (event === 'PASSWORD_RECOVERY') {
+          setAuthModalMode('reset_password');
+          setIsAuthModalOpen(true);
+        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
           if (session?.access_token) {
             api.setCustomerToken(session.access_token);
           }
@@ -468,14 +478,41 @@ export const CustomerAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         redirectTo: redirectUrl,
       });
       if (error) {
+        // Do not reveal user enumeration, but handle true network/rate-limit blocks gracefully
+        console.warn('Supabase resetPassword note:', error.message);
+      }
+      return {
+        success: true,
+        message: 'If an account exists for this email, a password reset link has been sent.'
+      };
+    } catch (err: any) {
+      return {
+        success: true,
+        message: 'If an account exists for this email, a password reset link has been sent.'
+      };
+    }
+  };
+
+  const updatePassword = async (newPassword: string): Promise<{ success: boolean; error?: string; message?: string }> => {
+    if (!newPassword || newPassword.length < 8) {
+      return { success: false, error: 'Password must be at least 8 characters long.' };
+    }
+
+    if (!isSupabaseConfigured()) {
+      return { success: false, error: 'Supabase configuration missing.' };
+    }
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
         return { success: false, error: error.message };
       }
       return {
         success: true,
-        message: 'Password reset instructions have been sent to your email.'
+        message: 'Your password has been successfully updated. You can now log in.'
       };
     } catch (err: any) {
-      return { success: false, error: err.message || 'Password reset request failed' };
+      return { success: false, error: err.message || 'Failed to update password' };
     }
   };
 
@@ -510,6 +547,7 @@ export const CustomerAuthProvider: React.FC<{ children: ReactNode }> = ({ childr
         signupWithEmail,
         loginWithGoogle,
         resetPassword,
+        updatePassword,
         resendConfirmationEmail,
         updateProfile,
         logout,

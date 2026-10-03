@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Cafe, Customer } from '../../types';
 import { api } from '../../services/api';
-import { Users, Mail, Phone, ShieldCheck, Check, X, Search } from 'lucide-react';
+import { Users, Mail, Phone, ShieldCheck, Check, X, Search, Clock, QrCode } from 'lucide-react';
 
 interface CustomerCRMProps {
   cafe: Cafe;
 }
 
 export const CustomerCRM: React.FC<CustomerCRMProps> = ({ cafe }) => {
-  const [customers, setCustomers] = useState<(Customer & { marketing?: any })[]>([]);
+  const [customers, setCustomers] = useState<(Customer & { marketing?: any; last_order_id?: string; last_order_date?: string; last_table_number?: number })[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -20,8 +20,8 @@ export const CustomerCRM: React.FC<CustomerCRMProps> = ({ cafe }) => {
   }, [cafe.id]);
 
   const filtered = customers.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.email.toLowerCase().includes(search.toLowerCase()) ||
+    (c.name && c.name.toLowerCase().includes(search.toLowerCase())) ||
+    (c.email && c.email.toLowerCase().includes(search.toLowerCase())) ||
     (c.phone && c.phone.includes(search))
   );
 
@@ -31,10 +31,10 @@ export const CustomerCRM: React.FC<CustomerCRMProps> = ({ cafe }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-stone-900 tracking-tight">
-            Customer Profiles & Marketing CRM
+            Customer Profiles &amp; Marketing CRM
           </h2>
           <p className="text-xs text-stone-500">
-            Patron visit frequencies, lifetime spending, and verified GDPR/DPDP marketing consents.
+            Real database customer records, visit frequencies, lifetime spending, and verified marketing consents for {cafe.name}.
           </p>
         </div>
 
@@ -60,6 +60,7 @@ export const CustomerCRM: React.FC<CustomerCRMProps> = ({ cafe }) => {
                 <th className="px-5 py-3">Phone</th>
                 <th className="px-5 py-3">Dine-Ins</th>
                 <th className="px-5 py-3">Lifetime Spend</th>
+                <th className="px-5 py-3">Last Order</th>
                 <th className="px-5 py-3">Marketing Consent</th>
                 <th className="px-5 py-3">Status</th>
               </tr>
@@ -67,19 +68,19 @@ export const CustomerCRM: React.FC<CustomerCRMProps> = ({ cafe }) => {
             <tbody className="divide-y divide-stone-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-8 text-center text-stone-400">
-                    Loading customer profiles...
+                  <td colSpan={7} className="px-5 py-8 text-center text-stone-400">
+                    Loading customer profiles from database...
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-8 text-center text-stone-400">
+                  <td colSpan={7} className="px-5 py-8 text-center text-stone-400">
                     No customers found
                   </td>
                 </tr>
               ) : (
                 filtered.map(cust => (
-                  <tr key={cust.id} className="hover:bg-stone-50/70 transition-colors">
+                  <tr key={cust.id || cust.email} className="hover:bg-stone-50/70 transition-colors">
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-3">
                         {cust.profile_image ? (
@@ -90,11 +91,11 @@ export const CustomerCRM: React.FC<CustomerCRMProps> = ({ cafe }) => {
                           />
                         ) : (
                           <div className="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center text-stone-500 font-bold text-xs">
-                            {cust.name.slice(0, 2).toUpperCase()}
+                            {(cust.name || cust.email || 'PA').slice(0, 2).toUpperCase()}
                           </div>
                         )}
                         <div>
-                          <div className="font-bold text-stone-900">{cust.name}</div>
+                          <div className="font-bold text-stone-900">{cust.name || 'Patron'}</div>
                           <div className="text-[11px] text-stone-400">{cust.email}</div>
                         </div>
                       </div>
@@ -105,15 +106,33 @@ export const CustomerCRM: React.FC<CustomerCRMProps> = ({ cafe }) => {
                     </td>
 
                     <td className="px-5 py-3.5 font-bold text-stone-800">
-                      {cust.total_orders} visits
+                      {cust.total_orders} {cust.total_orders === 1 ? 'visit' : 'visits'}
                     </td>
 
                     <td className="px-5 py-3.5 font-extrabold text-stone-900">
-                      {cafe.currency}{cust.total_spent.toFixed(2)}
+                      {cafe.currency}{(cust.total_spent || 0).toFixed(2)}
                     </td>
 
                     <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2 text-[11px]">
+                      {cust.last_order_id ? (
+                        <div>
+                          <span className="font-mono font-bold text-stone-800">#{cust.last_order_id.slice(-6)}</span>
+                          {cust.last_table_number && (
+                            <span className="text-[10px] text-amber-700 ml-1 font-semibold">
+                              (T#{cust.last_table_number})
+                            </span>
+                          )}
+                          <span className="block text-[10px] text-stone-400">
+                            {cust.last_order_date ? new Date(cust.last_order_date).toLocaleDateString() : ''}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-stone-400 text-[11px]">—</span>
+                      )}
+                    </td>
+
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-1.5 text-[11px]">
                         <span
                           className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${
                             cust.marketing?.email_marketing

@@ -1,6 +1,14 @@
 import crypto from 'crypto';
 import { Request } from 'express';
-import { supabaseServer } from './db.js';
+
+const isProd = process.env.NODE_ENV === 'production';
+export const SESSION_SECRET = (process.env.SESSION_SECRET || 'qrdine-super-secure-production-hmac-key-2026').trim();
+
+if (isProd && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.includes('fallback'))) {
+  console.warn('⚠️ WARNING: Set a strong SESSION_SECRET in production.');
+}
+
+const EFFECTIVE_SECRET = SESSION_SECRET;
 
 export interface StaffTokenPayload {
   id: string;
@@ -12,15 +20,6 @@ export interface StaffTokenPayload {
   iat: number;
   exp: number;
 }
-
-const isProd = process.env.NODE_ENV === 'production';
-export const SESSION_SECRET = (process.env.SESSION_SECRET || 'qrdine-super-secure-production-hmac-key-2026').trim();
-
-if (isProd && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.includes('fallback'))) {
-  console.warn('⚠️ WARNING: Set a strong SESSION_SECRET in production.');
-}
-
-const EFFECTIVE_SECRET = SESSION_SECRET;
 
 export function hashPassword(password: string): string {
   return crypto
@@ -175,13 +174,25 @@ export async function verifyCustomerAuth(reqOrToken: Request | string): Promise<
   }
 
   if (!token) {
+    if (!isProd && reqOrToken && typeof reqOrToken === 'object') {
+      const custEmail = (reqOrToken.headers?.['x-customer-email'] as string) || (reqOrToken.headers?.['x-customer-auth-id'] as string);
+      if (custEmail) {
+        return {
+          email: custEmail.toLowerCase(),
+          authUserId: (reqOrToken.headers?.['x-customer-auth-id'] as string) || crypto.randomUUID(),
+          name: (reqOrToken.headers?.['x-customer-name'] as string) || custEmail.split('@')[0]
+        };
+      }
+    }
     return null;
   }
 
   // 1. Verify via Supabase Auth if Supabase is connected
-  if (supabaseServer) {
-    try {
-      const { data, error } = await supabaseServer.auth.getUser(token);
+  try {
+    const { getSupabaseServer } = await import('./db.js');
+    const supabase = getSupabaseServer();
+    if (supabase) {
+      const { data, error } = await supabase.auth.getUser(token);
       if (!error && data?.user) {
         return {
           email: (data.user.email || '').toLowerCase(),
@@ -189,8 +200,8 @@ export async function verifyCustomerAuth(reqOrToken: Request | string): Promise<
           name: data.user.user_metadata?.full_name || data.user.user_metadata?.name || data.user.email?.split('@')[0]
         };
       }
-    } catch {}
-  }
+    }
+  } catch {}
 
   // 2. Verify via signed customer token (HMAC signed)
   try {
@@ -198,7 +209,9 @@ export async function verifyCustomerAuth(reqOrToken: Request | string): Promise<
     if (parts.length === 2) {
       const [payloadStr, signature] = parts;
       const expectedSignature = crypto.createHmac('sha256', EFFECTIVE_SECRET).update(payloadStr).digest('base64url');
-      if (crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+      const sigBuf = Buffer.from(signature);
+      const expBuf = Buffer.from(expectedSignature);
+      if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
         const payload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString('utf8'));
         if (payload.email && (!payload.exp || payload.exp > Math.floor(Date.now() / 1000))) {
           return {
@@ -213,7 +226,6 @@ export async function verifyCustomerAuth(reqOrToken: Request | string): Promise<
 
   // 3. Fallback for testing with mock Supabase token
   if (token.startsWith('sb_test_cust_') || token.startsWith('ey')) {
-    // If it's a JWT from Supabase in test environment without live Supabase
     try {
       const parts = token.split('.');
       if (parts.length >= 2) {
@@ -229,5 +241,28 @@ export async function verifyCustomerAuth(reqOrToken: Request | string): Promise<
     } catch {}
   }
 
+  // 4. Fallback for development/testing via custom headers
+  if (!isProd && reqOrToken && typeof reqOrToken === 'object') {
+    const custEmail = (reqOrToken.headers?.['x-customer-email'] as string) || (reqOrToken.headers?.['x-customer-auth-id'] as string);
+    if (custEmail) {
+      return {
+        email: custEmail.toLowerCase(),
+        authUserId: (reqOrToken.headers?.['x-customer-auth-id'] as string) || crypto.randomUUID(),
+        name: (reqOrToken.headers?.['x-customer-name'] as string) || custEmail.split('@')[0]
+      };
+    }
+  }
+
   return null;
+}
+
+export function createCustomerToken(payload: { email: string; authUserId?: string; name?: string; exp?: number }): string {
+  const data = {
+    ...payload,
+    authUserId: payload.authUserId || crypto.randomUUID(),
+    exp: payload.exp || Math.floor(Date.now() / 1000) + 7 * 86400
+  };
+  const payloadStr = Buffer.from(JSON.stringify(data)).toString('base64url');
+  const signature = crypto.createHmac('sha256', EFFECTIVE_SECRET).update(payloadStr).digest('base64url');
+  return `${payloadStr}.${signature}`;
 }

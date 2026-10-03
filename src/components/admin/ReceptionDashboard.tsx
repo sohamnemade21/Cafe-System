@@ -85,18 +85,22 @@ export const ReceptionDashboard: React.FC<ReceptionDashboardProps> = ({
     // Listen to real-time events via SSE
     const eventSource = new EventSource(buildRealtimeStreamUrl());
 
-    eventSource.addEventListener('new_order', () => {
+    const handleNewOrder = () => {
       loadReceptionData();
       if (soundEnabled) playOrderChime();
-    });
+    };
 
-    eventSource.addEventListener('payment_confirmed', () => {
-      loadReceptionData();
-    });
+    eventSource.addEventListener('new_order', handleNewOrder);
+    eventSource.addEventListener('order_created', handleNewOrder);
+    eventSource.addEventListener('order_status_updated', () => loadReceptionData());
 
-    eventSource.addEventListener('table_status_changed', () => {
-      loadReceptionData();
-    });
+    eventSource.addEventListener('payment_confirmed', () => loadReceptionData());
+    eventSource.addEventListener('payment_success', () => loadReceptionData());
+    eventSource.addEventListener('reception_payment_settled', () => loadReceptionData());
+
+    eventSource.addEventListener('table_status_changed', () => loadReceptionData());
+    eventSource.addEventListener('table_created', () => loadReceptionData());
+    eventSource.addEventListener('table_released', () => loadReceptionData());
 
     eventSource.addEventListener('bill_requested', () => {
       loadReceptionData();

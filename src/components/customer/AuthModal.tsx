@@ -7,7 +7,7 @@ import { Mail, Lock, User, Eye, EyeOff, Loader2, ArrowRight, ShieldCheck, CheckC
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialMode?: 'login' | 'signup' | 'forgot_password';
+  initialMode?: 'login' | 'signup' | 'forgot_password' | 'reset_password';
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -20,10 +20,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     signupWithEmail,
     loginWithGoogle,
     resetPassword,
+    updatePassword,
     resendConfirmationEmail,
   } = useCustomerAuth();
 
-  const [mode, setMode] = useState<'login' | 'signup' | 'forgot_password'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'signup' | 'forgot_password' | 'reset_password'>(initialMode);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -144,10 +145,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (!res.success) {
         setErrorMessage(res.error || 'Unable to send password reset email');
       } else {
-        setSuccessMessage(res.message || 'Password reset link sent to your email.');
+        setSuccessMessage(res.message || 'If an account exists for this email, a password reset link has been sent.');
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Password reset failed');
+      setErrorMessage(err.message || 'Password reset request failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loading) return;
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (password.length < 8) {
+      setErrorMessage('Password must be at least 8 characters long');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorMessage('Passwords do not match. Please re-enter.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const res = await updatePassword(password);
+      if (!res.success) {
+        setErrorMessage(res.error || 'Failed to update password');
+      } else {
+        setSuccessMessage(res.message || 'Password updated successfully! Switching to sign in...');
+        setTimeout(() => {
+          setMode('login');
+          setPassword('');
+          setConfirmPassword('');
+        }, 1500);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to update password');
     } finally {
       setLoading(false);
     }
@@ -178,6 +214,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ? 'Customer Sign In'
           : mode === 'signup'
           ? 'Create Customer Account'
+          : mode === 'reset_password'
+          ? 'Choose New Password'
           : 'Reset Your Password'
       }
       maxWidth="max-w-md"
@@ -197,7 +235,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
 
         {/* Tab switch between Login & Signup */}
-        {mode !== 'forgot_password' && (
+        {mode !== 'forgot_password' && mode !== 'reset_password' && (
           <div className="grid grid-cols-2 p-1 bg-[#FAF6F0] rounded-xl border border-[#EFE7DD] text-xs font-bold">
             <button
               type="button"
@@ -624,6 +662,91 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </>
               ) : (
                 <span>Send Password Reset Link</span>
+              )}
+            </button>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                }}
+                className="text-xs font-bold text-[#C87D32] hover:underline cursor-pointer"
+              >
+                ← Back to Sign In
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* 4. SET NEW PASSWORD (RECOVERY) FORM */}
+        {mode === 'reset_password' && (
+          <form onSubmit={handleResetPasswordSubmit} className="space-y-3.5">
+            <p className="text-xs text-[#705648] leading-relaxed">
+              Please enter and confirm your new account password below.
+            </p>
+
+            <div>
+              <label className="block text-xs font-bold text-[#2A1810] mb-1">
+                New Password
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#8A7365]">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Min 8 characters"
+                  className="w-full pl-9 pr-9 py-2 text-xs rounded-xl border border-[#EFE7DD] bg-white focus:outline-none focus:ring-2 focus:ring-[#C87D32]/30 focus:border-[#C87D32] transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#8A7365] hover:text-[#2A1810] cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[#2A1810] mb-1">
+                Confirm New Password
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#8A7365]">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter new password"
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-[#EFE7DD] bg-white focus:outline-none focus:ring-2 focus:ring-[#C87D32]/30 focus:border-[#C87D32] transition-colors"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 px-4 bg-[#C87D32] hover:bg-[#B36B28] disabled:opacity-60 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-98"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Updating Password...</span>
+                </>
+              ) : (
+                <span>Update Password &amp; Continue</span>
               )}
             </button>
 

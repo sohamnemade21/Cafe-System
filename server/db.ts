@@ -109,7 +109,7 @@ export interface OrderRecord {
   discount: number;
   coupon_code?: string;
   total: number;
-  payment_status: 'UNPAID' | 'PAYMENT_PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
+  payment_status: 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED' | 'UNPAID' | 'PAYMENT_PENDING';
   order_status: 'PENDING' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'SERVED' | 'COMPLETED' | 'CANCELLED';
   payment_id?: string;
   notes?: string;
@@ -634,7 +634,7 @@ export const db = {
   async createCategory(cafeId: string, data: { name: string; description?: string; display_order?: number }): Promise<CategoryRecord> {
     const cafe = await this.getCafeBySlugOrId(cafeId);
     const targetId = cafe ? cafe.id : cafeId;
-    const newId = `cat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newId = crypto.randomUUID();
 
     const newCat: CategoryRecord = {
       id: newId,
@@ -738,7 +738,7 @@ export const db = {
   async createMenuItem(cafeId: string, itemData: any): Promise<MenuItemRecord> {
     const cafe = await this.getCafeBySlugOrId(cafeId);
     const targetId = cafe ? cafe.id : cafeId;
-    const newId = `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newId = crypto.randomUUID();
 
     const newItem: MenuItemRecord = {
       id: newId,
@@ -781,7 +781,7 @@ export const db = {
       if (newItem.variants && newItem.variants.length > 0) {
         await supabaseServer.from('menu_item_variants').insert(
           newItem.variants.map((v: any) => ({
-            id: `v-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id: crypto.randomUUID(),
             menu_item_id: newItem.id,
             name: v.name,
             type: v.type || 'SIZE',
@@ -962,11 +962,12 @@ export const db = {
     if (!tokenOrId) return null;
 
     if (supabaseServer) {
-      const { data, error } = await supabaseServer
-        .from('table_sessions')
-        .select('*')
-        .or(`session_token.eq.${tokenOrId},id.eq.${tokenOrId}`)
-        .maybeSingle();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tokenOrId);
+      const query = isUuid
+        ? supabaseServer.from('table_sessions').select('*').or(`id.eq.${tokenOrId},session_token.eq.${tokenOrId}`).maybeSingle()
+        : supabaseServer.from('table_sessions').select('*').eq('session_token', tokenOrId).maybeSingle();
+
+      const { data, error } = await query;
 
       if (!error && data) {
         const { data: ordersData } = await supabaseServer
@@ -1016,7 +1017,7 @@ export const db = {
   },
 
   async createTableSession(data: Omit<TableSessionRecord, 'id' | 'created_at'>): Promise<TableSessionRecord> {
-    const newId = `ts-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newId = crypto.randomUUID();
     const session: TableSessionRecord = {
       id: newId,
       created_at: new Date().toISOString(),
@@ -1050,13 +1051,14 @@ export const db = {
 
   async updateTableSession(id: string, updates: Partial<TableSessionRecord>): Promise<TableSessionRecord | null> {
     if (supabaseServer) {
+      const { orders, ...dbUpdates } = updates;
       const { data, error } = await supabaseServer
         .from('table_sessions')
-        .update(updates)
+        .update(dbUpdates)
         .eq('id', id)
         .select()
         .single();
-      if (!error && data) return data;
+      if (!error && data) return { ...data, orders: orders || [] };
     }
 
     const session = memoryCache.tableSessions.find(s => s.id === id);
@@ -1099,7 +1101,7 @@ export const db = {
       if (orderData.items && orderData.items.length > 0) {
         await supabaseServer.from('order_items').insert(
           orderData.items.map(item => ({
-            id: item.id || `oi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id: item.id || crypto.randomUUID(),
             order_id: orderData.id,
             menu_item_id: item.menu_item_id || null,
             item_name: item.item_name,
@@ -1218,7 +1220,7 @@ export const db = {
   // --- INVOICES ---
   async createInvoice(invoiceData: { order_id: string; cafe_id: string; invoice_number: string; subtotal: number; tax: number; service_charge: number; discount: number; total: number; payment_method?: string; customer_name?: string; customer_email?: string; metadata_json?: any }) {
     const newInv = {
-      id: `inv-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: crypto.randomUUID(),
       created_at: new Date().toISOString(),
       ...invoiceData
     };
@@ -1252,12 +1254,12 @@ export const db = {
     const lower = identifier.trim().toLowerCase();
 
     if (supabaseServer) {
-      const { data, error } = await supabaseServer
-        .from('users')
-        .select('*')
-        .or(`email.ilike.${lower},id.eq.${lower}`)
-        .eq('is_active', true)
-        .maybeSingle();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lower);
+      const query = isUuid
+        ? supabaseServer.from('users').select('*').or(`email.ilike.${lower},id.eq.${lower}`).eq('is_active', true).maybeSingle()
+        : supabaseServer.from('users').select('*').ilike('email', lower).eq('is_active', true).maybeSingle();
+
+      const { data, error } = await query;
 
       if (!error && data) {
         return {
@@ -1303,7 +1305,7 @@ export const db = {
   // --- AUDIT LOGS ---
   async logAudit(entry: { cafe_id: string; user_id?: string; user_name?: string; role?: string; action: string; details?: any }) {
     const newLog = {
-      id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       ...entry
     };
@@ -1344,7 +1346,7 @@ export const db = {
 
   async createNotification(notif: { cafe_id: string; table_id: string; table_number: number; type: string; message: string }) {
     const newNotif = {
-      id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: crypto.randomUUID(),
       created_at: new Date().toISOString(),
       is_read: false,
       ...notif
@@ -1364,10 +1366,11 @@ export const db = {
 
     if (supabaseServer) {
       // Check if customer exists by email or auth_user_id
+      const isAuthUuid = data.auth_user_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.auth_user_id);
       const { data: existing } = await supabaseServer
         .from('customers')
         .select('*')
-        .or(`email.eq.${email}${data.auth_user_id ? `,auth_user_id.eq.${data.auth_user_id}` : ''}`)
+        .or(`email.eq.${email}${isAuthUuid ? `,auth_user_id.eq.${data.auth_user_id}` : ''}`)
         .maybeSingle();
 
       if (existing) {
@@ -1377,7 +1380,7 @@ export const db = {
             name: data.name || existing.name,
             phone: data.phone || existing.phone,
             profile_image: data.profile_image || existing.profile_image,
-            auth_user_id: data.auth_user_id || existing.auth_user_id,
+            auth_user_id: isAuthUuid ? data.auth_user_id : existing.auth_user_id,
             updated_at: new Date().toISOString()
           })
           .eq('id', existing.id)
@@ -1386,12 +1389,12 @@ export const db = {
 
         if (!error && updated) return updated;
       } else {
-        const newCustId = `cust-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const newCustId = crypto.randomUUID();
         const { data: created, error } = await supabaseServer
           .from('customers')
           .insert({
             id: newCustId,
-            auth_user_id: data.auth_user_id || null,
+            auth_user_id: isAuthUuid ? data.auth_user_id : null,
             email,
             name: data.name,
             phone: data.phone || null,
@@ -1420,7 +1423,7 @@ export const db = {
     }
 
     const newCust = {
-      id: `cust-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: crypto.randomUUID(),
       auth_user_id: data.auth_user_id || undefined,
       email,
       name: data.name,
@@ -1440,12 +1443,12 @@ export const db = {
     const lower = identifier.trim().toLowerCase();
 
     if (supabaseServer) {
-      const { data, error } = await supabaseServer
-        .from('customers')
-        .select('*, marketing_consents(*)')
-        .or(`email.ilike.${lower},id.eq.${identifier},auth_user_id.eq.${identifier}`)
-        .maybeSingle();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+      const query = isUuid
+        ? supabaseServer.from('customers').select('*, marketing_consents(*)').or(`id.eq.${identifier},auth_user_id.eq.${identifier}`).maybeSingle()
+        : supabaseServer.from('customers').select('*, marketing_consents(*)').ilike('email', lower).maybeSingle();
 
+      const { data, error } = await query;
       if (!error && data) return data;
     }
 
@@ -1456,13 +1459,12 @@ export const db = {
 
   async updateCustomer(identifier: string, updates: { name?: string; phone?: string; profile_image?: string }) {
     if (supabaseServer) {
-      const { data, error } = await supabaseServer
-        .from('customers')
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .or(`email.ilike.${identifier},id.eq.${identifier},auth_user_id.eq.${identifier}`)
-        .select()
-        .maybeSingle();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier);
+      const query = isUuid
+        ? supabaseServer.from('customers').update({ ...updates, updated_at: new Date().toISOString() }).or(`id.eq.${identifier},auth_user_id.eq.${identifier}`).select().maybeSingle()
+        : supabaseServer.from('customers').update({ ...updates, updated_at: new Date().toISOString() }).ilike('email', identifier.toLowerCase()).select().maybeSingle();
 
+      const { data, error } = await query;
       if (!error && data) return data;
     }
 
@@ -1496,7 +1498,7 @@ export const db = {
         await supabaseServer
           .from('marketing_consents')
           .insert({
-            id: `mc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id: crypto.randomUUID(),
             customer_id: customerId,
             ...consent,
             consent_timestamp: new Date().toISOString()
@@ -1520,5 +1522,102 @@ export const db = {
     }
 
     return memoryCache.coupons.filter(c => c.cafe_id === targetId || c.cafe_id === cafe?.slug);
+  },
+
+  async getCustomersForCafe(cafeId: string) {
+    const cafe = await this.getCafeBySlugOrId(cafeId);
+    const targetId = cafe ? cafe.id : cafeId;
+    const orders = await this.getOrders(targetId);
+
+    let rawCustomers: any[] = [];
+    if (supabaseServer) {
+      const { data, error } = await supabaseServer
+        .from('customers')
+        .select('*, marketing_consents(*)');
+      if (!error && data) {
+        rawCustomers = data;
+      }
+    }
+
+    if (rawCustomers.length === 0) {
+      rawCustomers = memoryCache.customers;
+    }
+
+    // Build unique customer map by email and auth_user_id
+    const customerMap = new Map<string, any>();
+
+    for (const c of rawCustomers) {
+      const email = c.email?.toLowerCase().trim();
+      if (!email) continue;
+      const consentObj = Array.isArray(c.marketing_consents) && c.marketing_consents.length > 0
+        ? c.marketing_consents[0]
+        : (c.marketing || {});
+
+      customerMap.set(email, {
+        id: c.id,
+        auth_user_id: c.auth_user_id,
+        name: c.name,
+        email: c.email,
+        phone: c.phone || '',
+        profile_image: c.profile_image || '',
+        total_orders: 0,
+        total_spent: 0,
+        last_order_id: null,
+        last_order_date: null,
+        last_table_number: null,
+        marketing: {
+          email_marketing: Boolean(consentObj.email_marketing),
+          sms_marketing: Boolean(consentObj.sms_marketing),
+          whatsapp_marketing: Boolean(consentObj.whatsapp_marketing)
+        },
+        created_at: c.created_at
+      });
+    }
+
+    // Also include any customers who placed orders but might not have a separate customer row
+    for (const o of orders) {
+      const email = o.customer_email?.toLowerCase().trim();
+      if (!email) continue;
+
+      if (!customerMap.has(email)) {
+        customerMap.set(email, {
+          id: o.customer_id || `cust-${email}`,
+          auth_user_id: o.customer_id,
+          name: o.customer_name || email.split('@')[0],
+          email: o.customer_email,
+          phone: o.customer_phone || '',
+          profile_image: '',
+          total_orders: 0,
+          total_spent: 0,
+          last_order_id: null,
+          last_order_date: null,
+          last_table_number: null,
+          marketing: {
+            email_marketing: true,
+            sms_marketing: false,
+            whatsapp_marketing: true
+          },
+          created_at: o.created_at
+        });
+      }
+
+      const entry = customerMap.get(email)!;
+      if (o.order_status !== 'CANCELLED') {
+        entry.total_orders += 1;
+      }
+      if (o.payment_status === 'PAID') {
+        entry.total_spent = Number((entry.total_spent + o.total).toFixed(2));
+      }
+
+      const orderTime = new Date(o.created_at).getTime();
+      const currentLastTime = entry.last_order_date ? new Date(entry.last_order_date).getTime() : 0;
+      if (orderTime >= currentLastTime) {
+        entry.last_order_id = o.id;
+        entry.last_order_date = o.created_at;
+        entry.last_table_number = o.table_number;
+      }
+    }
+
+    return Array.from(customerMap.values());
   }
 };

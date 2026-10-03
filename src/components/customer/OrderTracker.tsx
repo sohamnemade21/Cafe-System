@@ -161,7 +161,7 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
           </div>
 
           <h2 className="text-xl sm:text-2xl font-serif-cafe font-bold text-[#2A1810] mt-2.5">
-            {order.order_status === 'SERVED'
+            {order.order_status === 'SERVED' || order.order_status === 'COMPLETED'
               ? 'Delivered to Your Table · Enjoy Your Meal!'
               : order.order_status === 'READY'
               ? 'Fresh Brew Ready to Serve'
@@ -169,12 +169,12 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
               ? 'Kitchen Freshly Preparing Your Order'
               : order.order_status === 'ACCEPTED'
               ? 'Order Accepted by Kitchen'
-              : 'Order Placed & Sent to Kitchen'}
+              : 'Order Confirmed ✓ Sent to Kitchen'}
           </h2>
           <p className="text-xs text-[#705648] mt-1 max-w-sm mx-auto">
-            {order.order_status === 'SERVED'
+            {order.order_status === 'SERVED' || order.order_status === 'COMPLETED'
               ? 'Your handcrafted items have been served. Savor your meal and pay when ready!'
-              : 'Kitchen is preparing your items with fresh ingredients.'}
+              : 'Your order has been sent to the kitchen and is being prepared. Payment is optional now.'}
           </p>
         </div>
 

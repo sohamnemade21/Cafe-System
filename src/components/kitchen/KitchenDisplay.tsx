@@ -44,7 +44,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ cafe, onExit, cu
     // Listen to real-time events via SSE
     const eventSource = new EventSource(buildRealtimeStreamUrl());
 
-    eventSource.addEventListener('new_order', (e: any) => {
+    const handleNewOrder = (e: any) => {
       try {
         const payload = JSON.parse(e.data);
         if (payload.order && payload.order.cafe_id === cafe.id) {
@@ -54,7 +54,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ cafe, onExit, cu
       } catch (err) {
         console.error(err);
       }
-    });
+    };
+
+    eventSource.addEventListener('new_order', handleNewOrder);
+    eventSource.addEventListener('order_created', handleNewOrder);
 
     eventSource.addEventListener('order_status_updated', (e: any) => {
       try {
@@ -94,7 +97,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ cafe, onExit, cu
   // Filter orders
   const filteredOrders = orders.filter(o => {
     if (activeFilter === 'ACTIVE') {
-      return ['PAID', 'ACCEPTED', 'PREPARING', 'READY'].includes(o.order_status);
+      return ['PENDING', 'CONFIRMED', 'PAID', 'ACCEPTED', 'PREPARING', 'READY'].includes(o.order_status);
     }
     if (activeFilter === 'PREPARING') {
       return o.order_status === 'PREPARING';
@@ -213,7 +216,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ cafe, onExit, cu
           <div className="h-96 flex flex-col items-center justify-center text-stone-500 border border-dashed border-stone-800 rounded-2xl">
             <ChefHat className="w-12 h-12 text-stone-700 mb-2" />
             <p className="text-base font-bold text-stone-400">Kitchen is all caught up!</p>
-            <p className="text-xs text-stone-600 mt-1">New paid orders will appear here automatically.</p>
+            <p className="text-xs text-stone-600 mt-1">New table orders will appear here automatically.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -329,12 +332,12 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ cafe, onExit, cu
 
                   {/* Chef Action Buttons */}
                   <div className="p-3 bg-stone-900/60 border-t border-stone-800">
-                    {order.order_status === 'PAID' || order.order_status === 'PENDING' ? (
+                    {order.order_status === 'CONFIRMED' || order.order_status === 'PENDING' || order.order_status === 'PAID' ? (
                       <button
-                        onClick={() => handleStatusChange(order.id, 'ACCEPTED')}
+                        onClick={() => handleStatusChange(order.id, 'PREPARING')}
                         className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs rounded-xl tracking-wider uppercase transition-all active:scale-98 cursor-pointer shadow-md"
                       >
-                        [ ACCEPT ORDER ]
+                        [ ACCEPT &amp; PREPARE ]
                       </button>
                     ) : order.order_status === 'ACCEPTED' ? (
                       <button
